@@ -26,7 +26,7 @@ export declare const SystemService: {
       readonly kind: MethodKind.Unary,
     },
     /**
-     * Restore the database state from a backup archive.
+     * Restore the user's state from a versioned JSON backup.
      *
      * @generated from rpc v1.SystemService.RestoreBackup
      */

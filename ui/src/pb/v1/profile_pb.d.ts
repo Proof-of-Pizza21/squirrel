@@ -15,100 +15,100 @@ export declare class UserProfile extends Message<UserProfile> {
   /**
    * UI color scheme: "light", "dark", or "" for system default.
    *
-   * @generated from field: string theme = 1;
+   * @generated from field: optional string theme = 1;
    */
-  theme: string;
+  theme?: string;
 
   /**
    * Preferred display currency code e.g. "EUR", "USD".
    *
-   * @generated from field: string preferred_currency = 2;
+   * @generated from field: optional string preferred_currency = 2;
    */
-  preferredCurrency: string;
+  preferredCurrency?: string;
 
   /**
    * Monthly living expenses in minor units (cents) for emergency reserve calculation.
    *
-   * @generated from field: int64 monthly_expenses_minor = 3;
+   * @generated from field: optional int64 monthly_expenses_minor = 3;
    */
-  monthlyExpensesMinor: bigint;
+  monthlyExpensesMinor?: bigint;
 
   /**
    * Number of months of expenses to target as emergency reserve (default 6).
    *
-   * @generated from field: int32 reserve_months = 4;
+   * @generated from field: optional int32 reserve_months = 4;
    */
-  reserveMonths: number;
+  reserveMonths?: number;
 
   /**
    * Whether to hide monetary balances in the UI.
    *
-   * @generated from field: bool hide_balances = 5;
+   * @generated from field: optional bool hide_balances = 5;
    */
-  hideBalances: boolean;
+  hideBalances?: boolean;
 
   /**
    * Target emergency cash reserve in minor units (cents).
    *
-   * @generated from field: int64 emergency_goal_minor = 6;
+   * @generated from field: optional int64 emergency_goal_minor = 6;
    */
-  emergencyGoalMinor: bigint;
+  emergencyGoalMinor?: bigint;
 
   /**
    * Annual expenses for FIRE calculation in minor units (cents).
    *
-   * @generated from field: int64 fire_expenses_minor = 7;
+   * @generated from field: optional int64 fire_expenses_minor = 7;
    */
-  fireExpensesMinor: bigint;
+  fireExpensesMinor?: bigint;
 
   /**
    * JSON string of visible instrument column IDs for the instrument finder.
    *
-   * @generated from field: string instrument_columns_json = 8;
+   * @generated from field: optional string instrument_columns_json = 8;
    */
-  instrumentColumnsJson: string;
+  instrumentColumnsJson?: string;
 
   /**
    * Whether to show the FIRE / financial independence calculator on the Overview.
    *
-   * @generated from field: bool show_fire_calculator = 9;
+   * @generated from field: optional bool show_fire_calculator = 9;
    */
-  showFireCalculator: boolean;
+  showFireCalculator?: boolean;
 
   /**
    * Whether to enable the BTP Rank plugin section.
    *
-   * @generated from field: bool enable_btp_ranks = 10;
+   * @generated from field: optional bool enable_btp_ranks = 10;
    */
-  enableBtpRanks: boolean;
+  enableBtpRanks?: boolean;
 
   /**
    * Currently active navigation tab e.g. "overview", "investments", "btp".
    *
-   * @generated from field: string active_tab = 11;
+   * @generated from field: optional string active_tab = 11;
    */
-  activeTab: string;
+  activeTab?: string;
 
   /**
    * JSON string of AI Assistant configuration settings.
    *
-   * @generated from field: string ai_settings_json = 12;
+   * @generated from field: optional string ai_settings_json = 12;
    */
-  aiSettingsJson: string;
+  aiSettingsJson?: string;
 
   /**
    * JSON string of custom draft portfolios.
    *
-   * @generated from field: string draft_portfolios_json = 13;
+   * @generated from field: optional string draft_portfolios_json = 13;
    */
-  draftPortfoliosJson: string;
+  draftPortfoliosJson?: string;
 
   /**
    * User description detailing investment objectives, risk exposure/tolerance, age, sex/gender, time horizon, etc.
    *
-   * @generated from field: string user_description = 14;
+   * @generated from field: optional string user_description = 14;
    */
-  userDescription: string;
+  userDescription?: string;
 
   constructor(data?: PartialMessage<UserProfile>);
 

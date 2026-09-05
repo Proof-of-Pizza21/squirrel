@@ -124,7 +124,7 @@ func (s *Server) UpdateHolding(ctx context.Context, req *connect.Request[portv1.
 	// Accept ID from either root field or holding.id — both refer to the same entity.
 	holdingID := req.Msg.Id
 	if holdingID == 0 {
-		holdingID = req.Msg.Holding.Id
+		holdingID = req.Msg.Holding.GetId()
 	}
 	// Load existing so FK fields (account_id, instrument_id) are never zeroed out by a partial update.
 	existing, err := s.store.GetHolding(ctx, holdingID, auth.UserIDOrEmpty(ctx))
@@ -133,14 +133,14 @@ func (s *Server) UpdateHolding(ctx context.Context, req *connect.Request[portv1.
 	}
 	patch := req.Msg.Holding
 	// Apply all user-editable fields; protect FK fields from accidental zero.
-	if patch.AccountId != 0 && patch.AccountId != existing.AccountID {
+	if patch.AccountId != nil && *patch.AccountId != existing.AccountID {
 		accounts, err := s.store.ListAccounts(ctx, auth.UserIDOrEmpty(ctx))
 		if err != nil {
 			return nil, connect.NewError(connect.CodeInternal, err)
 		}
 		owned := false
 		for _, a := range accounts {
-			if a.ID == patch.AccountId {
+			if a.ID == *patch.AccountId {
 				owned = true
 				break
 			}
@@ -148,21 +148,35 @@ func (s *Server) UpdateHolding(ctx context.Context, req *connect.Request[portv1.
 		if !owned {
 			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("account not found"))
 		}
-		existing.AccountID = patch.AccountId
+		existing.AccountID = *patch.AccountId
 	}
-	if patch.InstrumentId != 0 {
-		existing.InstrumentID = patch.InstrumentId
+	if patch.InstrumentId != nil {
+		existing.InstrumentID = *patch.InstrumentId
 	}
-	existing.InvestedMinor = patch.InvestedMinor
-	existing.ValueMinor = patch.ValueMinor
-	existing.TaxBPS = patch.TaxBps
-	existing.PlannedBPS = patch.PlannedBps
-	existing.IsPAC = patch.IsPac
-	existing.PACBPS = patch.PacBps
-	if patch.PacFrequency != "" {
-		existing.PACFrequency = patch.PacFrequency
+	if patch.InvestedMinor != nil {
+		existing.InvestedMinor = *patch.InvestedMinor
 	}
-	existing.Notes = patch.Notes
+	if patch.ValueMinor != nil {
+		existing.ValueMinor = *patch.ValueMinor
+	}
+	if patch.TaxBps != nil {
+		existing.TaxBPS = *patch.TaxBps
+	}
+	if patch.PlannedBps != nil {
+		existing.PlannedBPS = *patch.PlannedBps
+	}
+	if patch.IsPac != nil {
+		existing.IsPAC = *patch.IsPac
+	}
+	if patch.PacBps != nil {
+		existing.PACBPS = *patch.PacBps
+	}
+	if patch.PacFrequency != nil {
+		existing.PACFrequency = *patch.PacFrequency
+	}
+	if patch.Notes != nil {
+		existing.Notes = *patch.Notes
+	}
 	if err := s.store.SaveHolding(ctx, existing); err != nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}

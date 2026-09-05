@@ -266,6 +266,83 @@ export declare class CreateHoldingResponse extends Message<CreateHoldingResponse
 }
 
 /**
+ * HoldingPatch contains only fields that may be changed on an existing holding.
+ * Optional presence distinguishes an omitted field from an explicit zero/false value.
+ *
+ * @generated from message v1.HoldingPatch
+ */
+export declare class HoldingPatch extends Message<HoldingPatch> {
+  /**
+   * @generated from field: optional int64 id = 1;
+   */
+  id?: bigint;
+
+  /**
+   * @generated from field: optional int64 account_id = 2;
+   */
+  accountId?: bigint;
+
+  /**
+   * @generated from field: optional int64 instrument_id = 3;
+   */
+  instrumentId?: bigint;
+
+  /**
+   * @generated from field: optional int64 invested_minor = 11;
+   */
+  investedMinor?: bigint;
+
+  /**
+   * @generated from field: optional int64 value_minor = 12;
+   */
+  valueMinor?: bigint;
+
+  /**
+   * @generated from field: optional int64 tax_bps = 13;
+   */
+  taxBps?: bigint;
+
+  /**
+   * @generated from field: optional int64 planned_bps = 14;
+   */
+  plannedBps?: bigint;
+
+  /**
+   * @generated from field: optional bool is_pac = 17;
+   */
+  isPac?: boolean;
+
+  /**
+   * @generated from field: optional int64 pac_bps = 18;
+   */
+  pacBps?: bigint;
+
+  /**
+   * @generated from field: optional string pac_frequency = 19;
+   */
+  pacFrequency?: string;
+
+  /**
+   * @generated from field: optional string notes = 20;
+   */
+  notes?: string;
+
+  constructor(data?: PartialMessage<HoldingPatch>);
+
+  static readonly runtime: typeof proto3;
+  static readonly typeName = "v1.HoldingPatch";
+  static readonly fields: FieldList;
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): HoldingPatch;
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): HoldingPatch;
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): HoldingPatch;
+
+  static equals(a: HoldingPatch | PlainMessage<HoldingPatch> | undefined, b: HoldingPatch | PlainMessage<HoldingPatch> | undefined): boolean;
+}
+
+/**
  * @generated from message v1.UpdateHoldingRequest
  */
 export declare class UpdateHoldingRequest extends Message<UpdateHoldingRequest> {
@@ -280,9 +357,9 @@ export declare class UpdateHoldingRequest extends Message<UpdateHoldingRequest> 
    * Fields to update — only set what you want to change (e.g. pac_bps=0, is_pac=false).
    * All percentage/monetary values are in basis points: 10000=100%, 5000=50%, 0=0%.
    *
-   * @generated from field: v1.Holding holding = 2;
+   * @generated from field: v1.HoldingPatch holding = 2;
    */
-  holding?: Holding;
+  holding?: HoldingPatch;
 
   constructor(data?: PartialMessage<UpdateHoldingRequest>);
 

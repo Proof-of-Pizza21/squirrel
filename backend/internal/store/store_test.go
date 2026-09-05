@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -431,6 +432,13 @@ func TestChatSessionPersistence(t *testing.T) {
 	if got.Messages[0].Content != "What is the best TER?" {
 		t.Fatalf("unexpected message content: %s", got.Messages[0].Content)
 	}
+	if err := s.SaveChatSession(ctx, &ChatSessionRecord{ID: "chat-123", UserID: "user2", Title: "stolen"}); !errors.Is(err, ErrChatSessionOwnerMismatch) {
+		t.Fatalf("cross-user overwrite returned %v", err)
+	}
+	got, err = s.GetChatSession(ctx, "chat-123", "user1")
+	if err != nil || got == nil || got.Title != "MSCI World ETF Strategy" || len(got.Messages) != 2 {
+		t.Fatalf("cross-user overwrite changed the session: err=%v got=%+v", err, got)
+	}
 
 	if err := s.DeleteChatSession(ctx, "chat-123", "user1"); err != nil {
 		t.Fatalf("DeleteChatSession failed: %v", err)
@@ -442,4 +450,25 @@ func TestChatSessionPersistence(t *testing.T) {
 	}
 }
 
-
+func TestUpdateSituationRollsBackWhenSnapshotFails(t *testing.T) {
+	s, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	account := portfolio.Account{Name: "Cash", Currency: "EUR", BalanceMinor: 10_000}
+	if err := s.SaveAccount(ctx, &account, "user1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB().Exec(`CREATE TRIGGER reject_test_snapshot BEFORE INSERT ON snapshots BEGIN SELECT RAISE(ABORT, 'snapshot rejected'); END`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpdateSituation(ctx, "user1", map[int64]int64{account.ID: 20_000}, nil, nil, true, "2026-09-04"); err == nil {
+		t.Fatal("snapshot failure should fail the update")
+	}
+	accounts, err := s.ListAccounts(ctx, "user1")
+	if err != nil || len(accounts) != 1 || accounts[0].BalanceMinor != 10_000 {
+		t.Fatalf("snapshot failure did not roll back account changes: err=%v accounts=%+v", err, accounts)
+	}
+}

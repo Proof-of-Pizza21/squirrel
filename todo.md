@@ -1,59 +1,61 @@
-# Squirrel backlog
+# Squirrel improvement plan
 
-Squirrel is local-first and optimized for occasional rough updates. Prefer explainable calculations over transaction-level tracking, automatic trading, or features that require constant maintenance.
+Reviewed 2026-09-04 across the Go services/store/domain, protobuf and Connect boundary, auth/MCP/AI flows, React state/routes/styles, migrations, build/test setup, and documentation. Priority and order run top to bottom: protect data first, then make the current product dependable, then add capability.
 
-## Now — protect data and simplify updates
+## P0 — Security and data integrity
 
-- [x] Add a compact **Update situation** screen: edit account cash and current holding values in one place, then optionally save a dated snapshot.
-- [x] Add **backup and restore** under Settings.
-  - Export a timestamped `.tar.gz` containing the SQLite database and configuration.
-  - Validate an archive before restore and create an automatic rollback backup first.
-- [x] Add **Hide balances** to the header and remember it as a local UI preference. Do not rewrite the startup YAML from the browser.
-- [x] Add a **target drift** summary & **Invest €X** helper that allocates a new contribution toward underweight holdings without tracking individual PAC purchases.
-- [x] Consolidate all migrations use a better tool like goose
-- [ ] Analyze home workspaces/console for more modern go/ts patterns but don't copy the whole documentation part. just the nice technologies and dependencies in go/ts that are clearly better than the ones we have.
+- [x] **Make holding updates genuinely partial.** Presence-aware patch fields preserve every omitted value while still allowing explicit zero/false updates; regression-covered.
+- [x] **Enforce chat ownership end to end.** Active jobs are keyed by user plus session, status/stop/stream attachment are scoped, and saved-session collisions cannot replace another user's messages; two-user paths are covered.
+- [x] **Carry authenticated identity into AI tool calls.** Detached background jobs retain the authenticated identity in context without exposing bearer tokens to the model.
+- [x] **Make AI tools read-only by default.** An explicit method allowlist exposes only read operations, and the system prompt no longer advertises mutations.
 
-## Next — improve instrument analysis
+## P1 — Bug fixes and reliability
 
-- [x] Make comparison cohorts explicit and conservative: same asset class first, then same normalized index or equivalent exposure. Never compare bonds with equity.
-- [x] Add a side-by-side comparison for 2–5 selected instruments using the existing instrument columns.
-- [x] Explain every alternative result: peer-group match, TER difference, size difference, replication/policy changes, and missing data.
-- [x] Add catalog health indicators: total discovered, refreshed, stale, failed, excluded, and oldest refresh date.
-- [ ] Add saved instrument filters only if the current issuer/type/asset-class filters become repetitive in real use.
-- [ ] Version the ranking weights so a score remains understandable after the algorithm changes.
+- [x] **Fix profile persistence in the default no-auth setup.** The built-in local profile now saves under the same stable empty-user identity as other local data, and UI save failures are reported.
+- [x] **Use one complete, presence-aware profile contract.** Partial updates preserve untouched fields; active tab, theme/accent, sanitized AI settings, and draft portfolios sync through the profile while API keys remain session-local.
+- [x] **Derive cash diagnostics from the stored profile.** Summary computes the target server-side from monthly expenses and reserve months; obsolete localStorage inputs are gone.
+- [x] **Make backup round trips exhaustive and versioned.** `user_description`, chat history, and starred BTPs now round-trip in v2; configuration and API keys stay excluded. README documents the transactional JSON format.
+- [x] **Make “Update situation + snapshot” one transaction.** Snapshot failure now rolls back account and holding changes; trigger-backed regression-covered.
+- [x] **Use local calendar dates in snapshot forms.** Both snapshot screens share a tested local `YYYY-MM-DD` helper instead of UTC conversion.
+- [x] **Reuse cached market data in Geo Radar.** Stored EUR/USD data is reused, a live request occurs only on cache miss, and the UI shows observation date/source without a hard-coded rate.
+- [x] **Return actionable AI errors and bound chat input.** Typed stream errors reach the UI; IDs, provider settings, titles, roles, counts, messages, histories, tool payloads, and portfolio context are bounded and validated.
 
-## Next — diagnostics without AI
+## P1 — UI and accessibility
 
-- [x] Add deterministic warnings for:
-  - excessive idle cash relative to planned allocation;
-  - target-allocation drift;
-  - unusually high TER or account fees;
-  - duplicated index/exposure across holdings;
-  - stale instrument data;
-  - missing or ambiguous tax classification.
-- [ ] Keep reference rates hidden by default. Surface them inline only when an account uses a reference-linked interest tier.
-- [ ] Add base-currency conversion only when multiple currencies are actually used; keep original-currency totals visible.
+- [ ] **Build a real narrow-screen navigation.** At `<=768px` the sticky sidebar still reserves 70–256 px, leaving too little content at phone widths. Use the existing Mantine drawer/burger pattern and persist collapse only on desktop.
+- [ ] **Make invisible controls keyboard-visible.** Reveal table actions on `:focus-within`, add accessible names to icon-only controls, mark decorative SVGs appropriately, and honor `prefers-reduced-motion`.
+- [ ] **Show persistence and recovery states.** Replace best-effort silent saves with saving/saved/error feedback; add Retry to initial-load errors and keep the last usable data on refresh failures.
+- [ ] **Apply display preferences consistently.** Restore theme/accent from the profile, use the selected currency symbol instead of hard-coded `€` in Settings, and explain when figures remain in their original currency.
 
-## Architecture and maintainability
+## P1 — Tests and delivery
 
-- [x] Audit the repository after the quick-update flow lands. Consolidate only repeated table, filter, form, money, and confirmation patterns.
-- [x] Replace the handwritten JSON API contract with protobuf-generated Go and TypeScript types.
-  1. Define and review the schema and money/rate conventions.
-  2. Add reproducible code generation and compatibility checks.
-  3. Migrate endpoints incrementally.
-  4. Remove handwritten API types only after the last endpoint moves.
-- [x] Review the workspace/console project for useful patterns, then write a Squirrel-specific adoption plan before copying any architecture.
-- [ ] Expand focused tests around backup/restore, snapshots, money, taxes, ranking cohorts, and destructive operations.
+- [ ] **Make the default test suite hermetic.** `TestLiveFetchMarketContext` and `TestMCPWebSearchTool` call live services; move live probes behind an integration flag/tag and use `httptest` by default. `just test` currently fails offline while short/race tests and UI checks pass.
+- [ ] **Add CI for the existing quality gates.** Run protobuf generation consistency, `go vet`, offline Go tests, the race suite where practical, TypeScript checking, and UI tests on every change.
+- [ ] **Add financial golden cases.** Lock down tiered interest/tax rounding, allocation totals, BTP yield/duration/scoring boundaries, matured/zero-coupon bonds, multi-currency separation, and backup/restore fidelity.
+- [ ] **Add a few high-value UI flow tests.** Cover update-situation, destructive confirmation, profile save failure, backup restore, and AI tool confirmation; avoid broad snapshot testing.
 
-## Later — optional intelligence
+## P2 — Doable features
 
-- [x] Add an opt-in analysis export that previews exactly what portfolio data will leave the machine.
-- [x] Let an AI explain deterministic warnings and summarize trade-offs; it must not trade, mutate data, or silently upload financial details.
-- [x] Consider a local model first. Add a hosted provider only if its explanations are materially better.
+- [ ] **Show “what changed” between snapshots.** Add per-currency deltas, biggest movers, data age, and an optional short note; reuse the existing snapshot data rather than adding transaction tracking.
+- [ ] **Add preview-first CSV import.** Support accounts and holdings with column mapping, validation, duplicate detection, and an all-or-nothing commit; reuse existing domain validators and backup before import.
+- [ ] **Offer an optional consolidated base-currency view.** Enable it only for multi-currency portfolios, display the FX rate/timestamp, and always retain original-currency totals.
+- [ ] **Surface reference rates only in context.** Hide the standalone noise by default and show the rate, spread, effective yield, source, and freshness beside accounts that actually use a linked tier.
+- [ ] **Version ranking rules.** Display the BTP/instrument scoring version and factor weights so old recommendations remain explainable after tuning.
 
-## Deliberately out of scope
+## P2 — Refactoring and performance
 
-- Transaction, order, dividend, and monthly PAC history.
-- Live broker synchronization or automatic trading.
-- Tax-return calculation or personalized financial advice.
-- Background scraping that runs without an explicit user action.
+- [ ] **Retire the legacy `api(path, init)` facade.** It duplicates generated types, uses pervasive `any`/casts, and hid the partial-update bug. Call typed Connect clients directly or keep only small domain adapters, migrated one feature at a time.
+- [ ] **Stop full-app reloads after every mutation.** Update the affected account/holding/snapshot slice and cache the shared instrument catalog; do not refetch thousands of instruments for an unrelated edit.
+- [ ] **Query instruments directly by ID/ISIN.** Both getters load and scan the full catalog, multiplying work during lookup/enrichment; share one row scanner and use indexed SQL.
+- [ ] **Delete verified dead UI code and break the `App.tsx` import cycle.** Remove unused `SettingsModal`, `DraftPortfoliosModal`, alias views, dead types/wrappers, and obsolete panels; move only actually shared table/chart helpers out of `App.tsx` (roughly 700+ removable lines before CSS cleanup).
+- [ ] **Split large files only along active feature seams.** When touched, separate AI settings/history/provider code from the 1,500-line consultant view and form/table logic from the 1,000-line investments view; add no generic framework.
+- [ ] **Remove `samber/lo`.** Four simple map/filter/sum loops do not justify a production dependency.
+- [ ] **Bring docs back to the code.** Update the architecture map (`internal/service`, not `internal/httpapi`), backup format, AI mutation policy, auth behavior, and offline/integration test commands.
+
+## Later / evidence required
+
+- Saved filters only after repeated use shows the current filters are painful.
+- Full transaction/order/dividend/PAC history, broker sync, automatic trading, tax returns, personalized financial advice, and unattended scraping remain out of scope.
+- Do not add a state framework, repository layer, plugin system, or background queue unless measured complexity or scale requires one.
+
+Recommended first slices: **partial holding updates** as the smallest high-impact fix, or **chat ownership + authenticated AI tools** as the security slice.

@@ -61,7 +61,7 @@ import {
 } from '../api';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import { money, percent } from '../utils/format';
-import { useProfile, loadProfile } from '../hooks/useProfile';
+import { getProfile, updateProfile, useProfile, loadProfile } from '../hooks/useProfile';
 
 type AISettings = {
   provider: 'local' | 'ollama' | 'openai' | 'custom';
@@ -81,7 +81,7 @@ const defaultSettings: AISettings = {
 
 function getSavedSettings(): AISettings {
   try {
-    const raw = localStorage.getItem('squirrel.aiSettings');
+    const raw = getProfile().ai_settings_json || localStorage.getItem('squirrel.aiSettings');
     if (!raw) return defaultSettings;
     const parsed = JSON.parse(raw);
     const saved = {
@@ -123,6 +123,7 @@ export function AIConsultantView({
   holdings: Holding[];
   instruments: Instrument[];
 }) {
+  const [userProfile] = useProfile();
   const [settings, setSettings] = useState<AISettings>(getSavedSettings);
   const [settingsOpened, setSettingsOpened] = useState(false);
   const [prompt, setPrompt] = useState('');
@@ -253,6 +254,7 @@ export function AIConsultantView({
       if (cause instanceof Error && (cause.name === 'AbortError' || cause.message.toLowerCase().includes('abort'))) {
         return;
       }
+      setError(cause instanceof Error ? cause.message : 'Failed to reconnect to the AI response stream.');
     } finally {
       setLoading(false);
       abortControllerRef.current = null;
@@ -405,15 +407,25 @@ export function AIConsultantView({
 
   const saveSettings = (newSettings: AISettings) => {
     setSettings(newSettings);
+    const persisted = JSON.stringify({ ...newSettings, apiKey: '' });
     try {
-      localStorage.setItem('squirrel.aiSettings', JSON.stringify({ ...newSettings, apiKey: '' }));
+      localStorage.setItem('squirrel.aiSettings', persisted);
     } catch {
       /* optional */
     }
+    updateProfile({ ai_settings_json: persisted });
     setSettingsOpened(false);
   };
 
-  const [userProfile] = useProfile();
+  useEffect(() => {
+    if (!userProfile.ai_settings_json) return;
+    try {
+      const parsed = JSON.parse(userProfile.ai_settings_json);
+      setSettings(current => ({ ...current, ...parsed, apiKey: current.apiKey }));
+    } catch {
+      /* validation is enforced by the profile service */
+    }
+  }, [userProfile.ai_settings_json]);
 
   // Build sanitized portfolio summary context
   const primaryCurrency = summary.base_currency || 'EUR';

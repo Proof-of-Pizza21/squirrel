@@ -77,13 +77,36 @@ export const CreateHoldingResponse = /*@__PURE__*/ proto3.makeMessageType(
 );
 
 /**
+ * HoldingPatch contains only fields that may be changed on an existing holding.
+ * Optional presence distinguishes an omitted field from an explicit zero/false value.
+ *
+ * @generated from message v1.HoldingPatch
+ */
+export const HoldingPatch = /*@__PURE__*/ proto3.makeMessageType(
+  "v1.HoldingPatch",
+  () => [
+    { no: 1, name: "id", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 2, name: "account_id", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 3, name: "instrument_id", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 11, name: "invested_minor", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 12, name: "value_minor", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 13, name: "tax_bps", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 14, name: "planned_bps", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 17, name: "is_pac", kind: "scalar", T: 8 /* ScalarType.BOOL */, opt: true },
+    { no: 18, name: "pac_bps", kind: "scalar", T: 3 /* ScalarType.INT64 */, opt: true },
+    { no: 19, name: "pac_frequency", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+    { no: 20, name: "notes", kind: "scalar", T: 9 /* ScalarType.STRING */, opt: true },
+  ],
+);
+
+/**
  * @generated from message v1.UpdateHoldingRequest
  */
 export const UpdateHoldingRequest = /*@__PURE__*/ proto3.makeMessageType(
   "v1.UpdateHoldingRequest",
   () => [
     { no: 1, name: "id", kind: "scalar", T: 3 /* ScalarType.INT64 */ },
-    { no: 2, name: "holding", kind: "message", T: Holding },
+    { no: 2, name: "holding", kind: "message", T: HoldingPatch },
   ],
 );
 

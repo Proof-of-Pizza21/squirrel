@@ -3,6 +3,8 @@ package service
 import (
 	"cmp"
 	"context"
+	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -127,6 +129,12 @@ func (s *Server) GetSummary(ctx context.Context, req *connect.Request[portv1.Get
 	var targetCashMinor int64
 	if req.Msg.TargetCashMinor != nil {
 		targetCashMinor = *req.Msg.TargetCashMinor
+	} else {
+		profile, err := s.store.GetProfile(ctx, auth.UserIDOrEmpty(ctx))
+		if err != nil {
+			return nil, connect.NewError(connect.CodeInternal, err)
+		}
+		targetCashMinor = profile.MonthlyExpensesMinor * int64(profile.ReserveMonths)
 	}
 
 	rawDiagnostics := portfolio.EvaluateDiagnostics(accounts, holdings, instruments, s.baseCurrency, targetCashMinor, time.Now())
@@ -172,17 +180,42 @@ func (s *Server) GetGeoRadar(ctx context.Context, req *connect.Request[portv1.Ge
 		instrumentsMap[inst.ID] = inst
 	}
 
-	eurUsdRate := 1.08
-	fxMc, errFx := s.ecb.FetchEURUSD(ctx, 1)
-	if errFx == nil && len(fxMc.Metrics) > 0 {
-		eurUsdRate = fxMc.Metrics[0].Value
+	metrics, err := s.store.ListMarketMetrics(ctx)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	var eurUsdRate float64
+	var eurUsdObservedOn, eurUsdSourceURL string
+	for _, metric := range metrics {
+		if metric.Code == "FX_EURUSD" {
+			eurUsdRate = metric.Value
+			eurUsdObservedOn = metric.ObservedOn
+			eurUsdSourceURL = metric.SourceURL
+			break
+		}
+	}
+	if eurUsdRate <= 0 {
+		market, err := s.ecb.FetchEURUSD(ctx, 1)
+		if err != nil {
+			return nil, connect.NewError(connect.CodeUnavailable, fmt.Errorf("EUR/USD market data unavailable: %w", err))
+		}
+		if len(market.Metrics) == 0 || market.Metrics[0].Value <= 0 {
+			return nil, connect.NewError(connect.CodeUnavailable, errors.New("EUR/USD market data unavailable: provider returned no valid rate"))
+		}
+		metric := market.Metrics[0]
+		eurUsdRate, eurUsdObservedOn, eurUsdSourceURL = metric.Value, metric.ObservedOn, metric.SourceURL
+		if err := s.store.SaveMarketContext(ctx, market); err != nil {
+			return nil, connect.NewError(connect.CodeInternal, fmt.Errorf("cache EUR/USD market data: %w", err))
+		}
 	}
 
 	includeCash := req.Msg.GetIncludeCash()
 	radar := portfolio.CalculateGeoRadar(accounts, holdings, instrumentsMap, eurUsdRate, includeCash)
 
 	res := &portv1.GetGeoRadarResponse{
-		CurrentEurUsdRate: radar.CurrentEURUSDRate,
+		CurrentEurUsdRate:       radar.CurrentEURUSDRate,
+		CurrentEurUsdObservedOn: eurUsdObservedOn,
+		CurrentEurUsdSourceUrl:  eurUsdSourceURL,
 	}
 
 	for _, r := range radar.Regions {
@@ -205,8 +238,8 @@ func (s *Server) GetGeoRadar(ctx context.Context, req *connect.Request[portv1.Ge
 
 	for _, curr := range radar.Currencies {
 		res.Currencies = append(res.Currencies, &portv1.CurrencyExposure{
-			Currency:          curr.Currency,
-			IsHedged:          curr.IsHedged,
+			Currency:           curr.Currency,
+			IsHedged:           curr.IsHedged,
 			ValueMinor:         curr.ValueMinor,
 			Percentage:         curr.Percentage,
 			FxImpact_5PctMinor: curr.FXImpact5PctMinor,

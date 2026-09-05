@@ -436,6 +436,16 @@ export declare class GetGeoRadarResponse extends Message<GetGeoRadarResponse> {
    */
   currentEurUsdRate: number;
 
+  /**
+   * @generated from field: string current_eur_usd_observed_on = 6;
+   */
+  currentEurUsdObservedOn: string;
+
+  /**
+   * @generated from field: string current_eur_usd_source_url = 7;
+   */
+  currentEurUsdSourceUrl: string;
+
   constructor(data?: PartialMessage<GetGeoRadarResponse>);
 
   static readonly runtime: typeof proto3;

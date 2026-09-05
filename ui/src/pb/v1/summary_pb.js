@@ -141,6 +141,8 @@ export const GetGeoRadarResponse = /*@__PURE__*/ proto3.makeMessageType(
     { no: 3, name: "currencies", kind: "message", T: CurrencyExposure, repeated: true },
     { no: 4, name: "diagnostics", kind: "message", T: Diagnostic, repeated: true },
     { no: 5, name: "current_eur_usd_rate", kind: "scalar", T: 1 /* ScalarType.DOUBLE */ },
+    { no: 6, name: "current_eur_usd_observed_on", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 7, name: "current_eur_usd_source_url", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ],
 );
 

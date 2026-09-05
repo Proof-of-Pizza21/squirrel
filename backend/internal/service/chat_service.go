@@ -5,12 +5,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"connectrpc.com/connect"
@@ -76,19 +78,82 @@ type activeChatJob struct {
 	Ctx         context.Context
 	Cancel      context.CancelFunc
 	Broadcaster *chatBroadcaster
-	ActualNCtx  int32
+	ActualNCtx  atomic.Int32
 }
 
 type chatJobRegistry struct {
 	mu   sync.Mutex
-	jobs map[string]*activeChatJob
+	jobs map[chatJobKey]*activeChatJob
+}
+
+type chatJobKey struct {
+	UserID    string
+	SessionID string
 }
 
 var globalChatJobs = &chatJobRegistry{
-	jobs: make(map[string]*activeChatJob),
+	jobs: make(map[chatJobKey]*activeChatJob),
 }
 
-const maxAIContextSize int32 = 1 << 20
+const (
+	maxAIContextSize        int32 = 1 << 20
+	maxChatSessionIDSize          = 128
+	maxChatTitleSize              = 200
+	maxChatMessages               = 200
+	maxChatMessageSize            = 128 << 10
+	maxChatHistorySize            = 2 << 20
+	maxPortfolioContextSize       = 1 << 20
+)
+
+func validateChatSessionID(id string) error {
+	if id == "" || len(id) > maxChatSessionIDSize {
+		return errors.New("session id must be between 1 and 128 characters")
+	}
+	for i := range len(id) {
+		c := id[i]
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') && (c < '0' || c > '9') && c != '-' && c != '_' && c != '.' {
+			return errors.New("session id may contain only letters, numbers, dots, dashes, and underscores")
+		}
+	}
+	return nil
+}
+
+func validateStreamChatRequest(msg *portv1.StreamChatRequest) error {
+	if len(msg.Provider) > 32 || len(msg.Endpoint) > 2048 || len(msg.Model) > 256 || len(msg.ApiKey) > 16<<10 {
+		return errors.New("AI provider settings exceed the supported size")
+	}
+	if len(msg.Messages) > maxChatMessages {
+		return fmt.Errorf("chat history exceeds %d messages", maxChatMessages)
+	}
+	if len(msg.PortfolioContextJson) > maxPortfolioContextSize {
+		return errors.New("portfolio context exceeds 1 MiB")
+	}
+	total := 0
+	for _, message := range msg.Messages {
+		if message == nil {
+			return errors.New("chat history contains an empty message")
+		}
+		if message.Role != "user" && message.Role != "assistant" {
+			return fmt.Errorf("unsupported chat role %q", message.Role)
+		}
+		if len(message.Content) > maxChatMessageSize {
+			return errors.New("chat message exceeds 128 KiB")
+		}
+		total += len(message.Content)
+	}
+	if total > maxChatHistorySize {
+		return errors.New("chat history exceeds 2 MiB")
+	}
+	return nil
+}
+
+func backgroundChatContext(requestCtx context.Context) (context.Context, context.CancelFunc) {
+	ctx := context.Background()
+	if user, ok := auth.UserFromContext(requestCtx); ok {
+		ctx = auth.WithUser(ctx, user)
+	}
+	return context.WithCancel(ctx)
+}
 
 // probeServerContext tries to read the actual n_ctx from a running llama-server /props endpoint.
 // Returns 0 if not available (non-llama-server or unreachable).
@@ -120,12 +185,19 @@ func (s *Server) StreamChat(ctx context.Context, req *connect.Request[portv1.Str
 	if sessionID == "" {
 		sessionID = fmt.Sprintf("chat-%d", time.Now().UnixNano())
 	}
+	if err := validateChatSessionID(sessionID); err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	if err := validateStreamChatRequest(msg); err != nil {
+		return connect.NewError(connect.CodeInvalidArgument, err)
+	}
 	userID := auth.UserIDOrEmpty(ctx)
+	key := chatJobKey{UserID: userID, SessionID: sessionID}
 
 	globalChatJobs.mu.Lock()
-	job, exists := globalChatJobs.jobs[sessionID]
+	job, exists := globalChatJobs.jobs[key]
 	if !exists {
-		jobCtx, cancel := context.WithCancel(context.Background())
+		jobCtx, cancel := backgroundChatContext(ctx)
 		job = &activeChatJob{
 			SessionID:   sessionID,
 			UserID:      userID,
@@ -133,7 +205,7 @@ func (s *Server) StreamChat(ctx context.Context, req *connect.Request[portv1.Str
 			Cancel:      cancel,
 			Broadcaster: newBroadcaster(),
 		}
-		globalChatJobs.jobs[sessionID] = job
+		globalChatJobs.jobs[key] = job
 		globalChatJobs.mu.Unlock()
 
 		go s.runBackgroundChat(job, msg)
@@ -174,7 +246,7 @@ func (s *Server) StreamChat(ctx context.Context, req *connect.Request[portv1.Str
 func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatRequest) {
 	defer func() {
 		globalChatJobs.mu.Lock()
-		delete(globalChatJobs.jobs, job.SessionID)
+		delete(globalChatJobs.jobs, chatJobKey{UserID: job.UserID, SessionID: job.SessionID})
 		globalChatJobs.mu.Unlock()
 	}()
 
@@ -186,7 +258,7 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 	}
 	parsedEndpoint, err := validateHTTPSOrLoopbackURL(endpoint)
 	if len(endpoint) > 2048 || err != nil || parsedEndpoint.RawQuery != "" || parsedEndpoint.Fragment != "" {
-		job.Broadcaster.Broadcast(&portv1.StreamChatResponse{Done: true})
+		job.Broadcaster.Broadcast(&portv1.StreamChatResponse{ErrorMessage: "AI endpoint must be an HTTPS URL or a loopback HTTP URL without query parameters", Done: true})
 		return
 	}
 	endpoint = strings.TrimRight(parsedEndpoint.String(), "/")
@@ -195,7 +267,7 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 		model = s.config.AIModel
 	}
 	if model == "" || len(model) > 256 {
-		job.Broadcaster.Broadcast(&portv1.StreamChatResponse{Done: true})
+		job.Broadcaster.Broadcast(&portv1.StreamChatResponse{ErrorMessage: "AI model is required and must not exceed 256 characters", Done: true})
 		return
 	}
 
@@ -207,7 +279,7 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 		contextSize = 16384
 	}
 	if contextSize > maxAIContextSize {
-		job.Broadcaster.Broadcast(&portv1.StreamChatResponse{Done: true})
+		job.Broadcaster.Broadcast(&portv1.StreamChatResponse{ErrorMessage: "AI context size exceeds the supported limit", Done: true})
 		return
 	}
 
@@ -215,7 +287,7 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 		slog.InfoContext(ctx, "Server context smaller than configured — using server limit", "server_n_ctx", actualCtx, "configured", contextSize)
 		contextSize = int32(actualCtx)
 	}
-	job.ActualNCtx = contextSize
+	job.ActualNCtx.Store(contextSize)
 
 	var tools []map[string]interface{}
 	if s.mcpHandler != nil {
@@ -326,7 +398,13 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 	job.Broadcaster.Broadcast(&portv1.StreamChatResponse{ActualNCtx: contextSize})
 	apiKey := s.aiAPIKey(msg.ApiKey, requestedEndpoint, endpoint)
 
-	accumulatedContent, toolRecords := s.executeJobStreamChatPayload(ctx, job, endpoint, apiKey, payload, conversation, maxHistoryTokens, estimateTokens, 0)
+	accumulatedContent, toolRecords, err := s.executeJobStreamChatPayload(ctx, job, endpoint, apiKey, payload, conversation, maxHistoryTokens, estimateTokens, 0)
+	if err != nil {
+		if !errors.Is(err, context.Canceled) {
+			job.Broadcaster.Broadcast(&portv1.StreamChatResponse{ErrorMessage: err.Error(), Done: true})
+		}
+		return
+	}
 
 	if len(msg.Messages) > 0 {
 		existingSession, _ := s.store.GetChatSession(context.Background(), job.SessionID, job.UserID)
@@ -374,12 +452,15 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 			})
 		}
 
-		_ = s.store.SaveChatSession(context.Background(), &store.ChatSessionRecord{
+		if err := s.store.SaveChatSession(context.Background(), &store.ChatSessionRecord{
 			ID:       job.SessionID,
 			UserID:   job.UserID,
 			Title:    title,
 			Messages: messagesToSave,
-		})
+		}); err != nil {
+			job.Broadcaster.Broadcast(&portv1.StreamChatResponse{ErrorMessage: "AI response completed but the conversation could not be saved", Done: true})
+			return
+		}
 	}
 
 	job.Broadcaster.Broadcast(&portv1.StreamChatResponse{Done: true})
@@ -406,16 +487,16 @@ func (s *Server) executeJobStreamChatPayload(
 	maxPromptTokens int,
 	estimateTokens func([]map[string]interface{}) int,
 	toolRound int,
-) (string, []map[string]interface{}) {
+) (string, []map[string]interface{}, error) {
 	url := fmt.Sprintf("%s/chat/completions", endpoint)
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
-		return "", nil
+		return "", nil, fmt.Errorf("encode AI request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(bodyBytes))
 	if err != nil {
-		return "", nil
+		return "", nil, fmt.Errorf("build AI request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	if apiKey != "" {
@@ -425,19 +506,13 @@ func (s *Server) executeJobStreamChatPayload(
 	client := &http.Client{Timeout: 0}
 	res, err := client.Do(httpReq)
 	if err != nil {
-		job.Broadcaster.Broadcast(&portv1.StreamChatResponse{
-			DeltaText: fmt.Sprintf("\n[Error: Failed to connect to AI server at %s: %v]", url, err),
-		})
-		return "", nil
+		return "", nil, fmt.Errorf("connect to AI provider at %s: %w", url, err)
 	}
 	defer res.Body.Close()
 
 	if res.StatusCode >= 400 {
 		errBody, _ := io.ReadAll(io.LimitReader(res.Body, 64<<10))
-		job.Broadcaster.Broadcast(&portv1.StreamChatResponse{
-			DeltaText: fmt.Sprintf("\n[Error: AI provider HTTP %d: %s]", res.StatusCode, string(errBody)),
-		})
-		return "", nil
+		return "", nil, fmt.Errorf("AI provider HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(errBody)))
 	}
 
 	type toolCallDelta struct {
@@ -459,7 +534,7 @@ func (s *Server) executeJobStreamChatPayload(
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
-			return accumulatedText.String(), executedTools
+			return accumulatedText.String(), executedTools, ctx.Err()
 		default:
 		}
 
@@ -517,6 +592,9 @@ func (s *Server) executeJobStreamChatPayload(
 			}
 		}
 	}
+	if err := scanner.Err(); err != nil {
+		return accumulatedText.String(), executedTools, fmt.Errorf("read AI response: %w", err)
+	}
 
 	for i := 0; i < len(toolCallMap); i++ {
 		if tc, ok := toolCallMap[i]; ok && tc.Function.Name != "" {
@@ -531,7 +609,7 @@ func (s *Server) executeJobStreamChatPayload(
 		for _, tc := range pendingToolCalls {
 			select {
 			case <-ctx.Done():
-				return accumulatedText.String(), executedTools
+				return accumulatedText.String(), executedTools, ctx.Err()
 			default:
 			}
 
@@ -599,12 +677,15 @@ func (s *Server) executeJobStreamChatPayload(
 			}
 		}
 
-		subContent, subTools := s.executeJobStreamChatPayload(ctx, job, endpoint, apiKey, nextPayload, conversation, maxPromptTokens, estimateTokens, toolRound+1)
+		subContent, subTools, err := s.executeJobStreamChatPayload(ctx, job, endpoint, apiKey, nextPayload, conversation, maxPromptTokens, estimateTokens, toolRound+1)
 		accumulatedText.WriteString(subContent)
 		executedTools = append(executedTools, subTools...)
+		if err != nil {
+			return accumulatedText.String(), executedTools, err
+		}
 	}
 
-	return accumulatedText.String(), executedTools
+	return accumulatedText.String(), executedTools, nil
 }
 
 func (s *Server) ListChatSessions(ctx context.Context, req *connect.Request[portv1.ListChatSessionsRequest]) (*connect.Response[portv1.ListChatSessionsResponse], error) {
@@ -628,6 +709,9 @@ func (s *Server) ListChatSessions(ctx context.Context, req *connect.Request[port
 }
 
 func (s *Server) GetChatSession(ctx context.Context, req *connect.Request[portv1.GetChatSessionRequest]) (*connect.Response[portv1.GetChatSessionResponse], error) {
+	if err := validateChatSessionID(strings.TrimSpace(req.Msg.Id)); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 	userID := auth.UserIDOrEmpty(ctx)
 	session, err := s.store.GetChatSession(ctx, req.Msg.Id, userID)
 	if err != nil {
@@ -662,13 +746,20 @@ func (s *Server) GetChatSession(ctx context.Context, req *connect.Request[portv1
 
 func (s *Server) SaveChatSession(ctx context.Context, req *connect.Request[portv1.SaveChatSessionRequest]) (*connect.Response[portv1.SaveChatSessionResponse], error) {
 	userID := auth.UserIDOrEmpty(ctx)
-	if strings.TrimSpace(req.Msg.Id) == "" {
-		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("session id is required"))
+	req.Msg.Id = strings.TrimSpace(req.Msg.Id)
+	if err := validateChatSessionID(req.Msg.Id); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
 	}
 
 	title := strings.TrimSpace(req.Msg.Title)
 	if title == "" {
 		title = "New Conversation"
+	}
+	if len(title) > maxChatTitleSize {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("chat title exceeds 200 characters"))
+	}
+	if len(req.Msg.Messages) > maxChatMessages {
+		return nil, connect.NewError(connect.CodeInvalidArgument, fmt.Errorf("chat history exceeds %d messages", maxChatMessages))
 	}
 
 	rec := store.ChatSessionRecord{
@@ -677,7 +768,21 @@ func (s *Server) SaveChatSession(ctx context.Context, req *connect.Request[portv
 		Title:  title,
 	}
 
+	total := 0
 	for _, m := range req.Msg.Messages {
+		if m == nil || (m.Role != "user" && m.Role != "assistant" && m.Role != "tool" && m.Role != "error") {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("chat message has an unsupported role"))
+		}
+		if len(m.Content) > maxChatMessageSize {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("chat message exceeds 128 KiB"))
+		}
+		if len(m.Timestamp) > 64 {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("chat timestamp exceeds 64 characters"))
+		}
+		if len(m.ToolCallsJson) > maxChatMessageSize || (m.ToolCallsJson != "" && !json.Valid([]byte(m.ToolCallsJson))) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("tool calls must be valid JSON no larger than 128 KiB"))
+		}
+		total += len(m.Content) + len(m.ToolCallsJson)
 		rec.Messages = append(rec.Messages, store.ChatMessageRecord{
 			ID:            m.Id,
 			SessionID:     req.Msg.Id,
@@ -688,8 +793,14 @@ func (s *Server) SaveChatSession(ctx context.Context, req *connect.Request[portv
 			ToolCallsJSON: m.ToolCallsJson,
 		})
 	}
+	if total > maxChatHistorySize {
+		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("chat history exceeds 2 MiB"))
+	}
 
 	if err := s.store.SaveChatSession(ctx, &rec); err != nil {
+		if errors.Is(err, store.ErrChatSessionOwnerMismatch) {
+			return nil, connect.NewError(connect.CodePermissionDenied, errors.New("chat session belongs to another user"))
+		}
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
@@ -723,6 +834,9 @@ func (s *Server) SaveChatSession(ctx context.Context, req *connect.Request[portv
 }
 
 func (s *Server) DeleteChatSession(ctx context.Context, req *connect.Request[portv1.DeleteChatSessionRequest]) (*connect.Response[portv1.DeleteChatSessionResponse], error) {
+	if err := validateChatSessionID(strings.TrimSpace(req.Msg.Id)); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
 	userID := auth.UserIDOrEmpty(ctx)
 	if err := s.store.DeleteChatSession(ctx, req.Msg.Id, userID); err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
@@ -735,9 +849,13 @@ func (s *Server) StopChatSession(ctx context.Context, req *connect.Request[portv
 	if sessionID == "" {
 		return connect.NewResponse(&portv1.StopChatSessionResponse{Success: false}), nil
 	}
+	if err := validateChatSessionID(sessionID); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	key := chatJobKey{UserID: auth.UserIDOrEmpty(ctx), SessionID: sessionID}
 
 	globalChatJobs.mu.Lock()
-	job, exists := globalChatJobs.jobs[sessionID]
+	job, exists := globalChatJobs.jobs[key]
 	if exists && job != nil {
 		job.Cancel()
 	}
@@ -751,12 +869,16 @@ func (s *Server) GetChatStatus(ctx context.Context, req *connect.Request[portv1.
 	if sessionID == "" {
 		return connect.NewResponse(&portv1.GetChatStatusResponse{IsGenerating: false}), nil
 	}
+	if err := validateChatSessionID(sessionID); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	key := chatJobKey{UserID: auth.UserIDOrEmpty(ctx), SessionID: sessionID}
 
 	globalChatJobs.mu.Lock()
-	job, exists := globalChatJobs.jobs[sessionID]
+	job, exists := globalChatJobs.jobs[key]
 	var nCtx int32
 	if exists && job != nil {
-		nCtx = job.ActualNCtx
+		nCtx = job.ActualNCtx.Load()
 	}
 	globalChatJobs.mu.Unlock()
 
@@ -766,4 +888,3 @@ func (s *Server) GetChatStatus(ctx context.Context, req *connect.Request[portv1.
 		ActualNCtx:   nCtx,
 	}), nil
 }
-

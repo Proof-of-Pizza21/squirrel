@@ -81,7 +81,7 @@ const (
 type SystemServiceClient interface {
 	// Export a portable plaintext JSON backup of the current user's data.
 	ExportBackup(context.Context, *connect.Request[v1.ExportBackupRequest]) (*connect.Response[v1.ExportBackupResponse], error)
-	// Restore the database state from a backup archive.
+	// Restore the user's state from a versioned JSON backup.
 	RestoreBackup(context.Context, *connect.Request[v1.RestoreBackupRequest]) (*connect.Response[v1.RestoreBackupResponse], error)
 	// List available recommended and downloaded open-weights AI models in data/models/.
 	ListAIModels(context.Context, *connect.Request[v1.ListAIModelsRequest]) (*connect.Response[v1.ListAIModelsResponse], error)
@@ -299,7 +299,7 @@ func (c *systemServiceClient) GetChatStatus(ctx context.Context, req *connect.Re
 type SystemServiceHandler interface {
 	// Export a portable plaintext JSON backup of the current user's data.
 	ExportBackup(context.Context, *connect.Request[v1.ExportBackupRequest]) (*connect.Response[v1.ExportBackupResponse], error)
-	// Restore the database state from a backup archive.
+	// Restore the user's state from a versioned JSON backup.
 	RestoreBackup(context.Context, *connect.Request[v1.RestoreBackupRequest]) (*connect.Response[v1.RestoreBackupResponse], error)
 	// List available recommended and downloaded open-weights AI models in data/models/.
 	ListAIModels(context.Context, *connect.Request[v1.ListAIModelsRequest]) (*connect.Response[v1.ListAIModelsResponse], error)

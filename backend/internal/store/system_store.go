@@ -6,12 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/roarc0/squirrel/backend/internal/portfolio"
 )
 
-const backupVersion = 1
+const backupVersion = 2
 
 // UserBackup is the JSON schema for portable, user-scoped backups.
 type UserBackup struct {
@@ -21,6 +22,8 @@ type UserBackup struct {
 	Accounts   []BackupAccount  `json:"accounts"`
 	Snapshots  []BackupSnapshot `json:"snapshots"`
 	Profile    *BackupProfile   `json:"profile,omitempty"`
+	Chats      []BackupChat     `json:"chats,omitempty"`
+	BTPStarred []string         `json:"btp_starred,omitempty"`
 }
 
 type BackupAccount struct {
@@ -98,6 +101,22 @@ type BackupProfile struct {
 	ActiveTab             string `json:"active_tab,omitempty"`
 	AISettingsJSON        string `json:"ai_settings_json,omitempty"`
 	DraftPortfoliosJSON   string `json:"draft_portfolios_json,omitempty"`
+	UserDescription       string `json:"user_description,omitempty"`
+}
+
+type BackupChat struct {
+	Title     string              `json:"title"`
+	CreatedAt string              `json:"created_at"`
+	UpdatedAt string              `json:"updated_at"`
+	Messages  []BackupChatMessage `json:"messages,omitempty"`
+}
+
+type BackupChatMessage struct {
+	Role          string `json:"role"`
+	Content       string `json:"content"`
+	Timestamp     string `json:"timestamp,omitempty"`
+	ToolCallsJSON string `json:"tool_calls_json,omitempty"`
+	CreatedAt     string `json:"created_at"`
 }
 
 // ExportBackup exports only the authenticated user's data as JSON.
@@ -245,16 +264,54 @@ func (s *Store) ExportBackup(ctx context.Context, userID string) ([]byte, string
 		SELECT theme, preferred_currency, monthly_expenses_minor, reserve_months,
 		       hide_balances, emergency_goal_minor, fire_expenses_minor,
 		       instrument_columns_json, show_fire_calculator, enable_btp_ranks,
-		       active_tab, ai_settings_json, draft_portfolios_json
+		       active_tab, ai_settings_json, draft_portfolios_json, user_description
 		FROM user_profiles WHERE user_id=?`, userID).Scan(
 		&p.Theme, &p.PreferredCurrency, &p.MonthlyExpensesMinor, &p.ReserveMonths,
 		&p.HideBalances, &p.EmergencyGoalMinor, &p.FireExpensesMinor,
 		&p.InstrumentColumnsJSON, &p.ShowFireCalculator, &p.EnableBtpRanks,
-		&p.ActiveTab, &p.AISettingsJSON, &p.DraftPortfoliosJSON)
+		&p.ActiveTab, &p.AISettingsJSON, &p.DraftPortfoliosJSON, &p.UserDescription)
 	if err == nil {
+		p.AISettingsJSON = stripAIAPIKey(p.AISettingsJSON)
 		backup.Profile = &p
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return nil, "", fmt.Errorf("read profile: %w", err)
+	}
+
+	chats, err := s.ListChatSessions(ctx, userID)
+	if err != nil {
+		return nil, "", fmt.Errorf("list chats: %w", err)
+	}
+	for _, chat := range chats {
+		full, err := s.GetChatSession(ctx, chat.ID, userID)
+		if err != nil {
+			return nil, "", fmt.Errorf("read chat: %w", err)
+		}
+		if full == nil {
+			continue
+		}
+		backupChat := BackupChat{Title: chat.Title, CreatedAt: chat.CreatedAt.Format(time.RFC3339Nano), UpdatedAt: chat.UpdatedAt.Format(time.RFC3339Nano)}
+		for _, message := range full.Messages {
+			backupChat.Messages = append(backupChat.Messages, BackupChatMessage{
+				Role: message.Role, Content: message.Content, Timestamp: message.Timestamp,
+				ToolCallsJSON: message.ToolCallsJSON, CreatedAt: message.CreatedAt.Format(time.RFC3339Nano),
+			})
+		}
+		backup.Chats = append(backup.Chats, backupChat)
+	}
+	starRows, err := s.db.QueryContext(ctx, `SELECT isin FROM btp_starred WHERE user_id=? ORDER BY isin`, userID)
+	if err != nil {
+		return nil, "", fmt.Errorf("list starred BTPs: %w", err)
+	}
+	defer starRows.Close()
+	for starRows.Next() {
+		var isin string
+		if err := starRows.Scan(&isin); err != nil {
+			return nil, "", fmt.Errorf("read starred BTP: %w", err)
+		}
+		backup.BTPStarred = append(backup.BTPStarred, isin)
+	}
+	if err := starRows.Err(); err != nil {
+		return nil, "", fmt.Errorf("read starred BTPs: %w", err)
 	}
 
 	data, err := json.MarshalIndent(backup, "", "  ")
@@ -292,7 +349,7 @@ func (s *Store) RestoreBackup(ctx context.Context, userID string, backupData []b
 			ReserveMonths: p.ReserveMonths, HideBalances: p.HideBalances, EmergencyGoalMinor: p.EmergencyGoalMinor,
 			FireExpensesMinor: p.FireExpensesMinor, InstrumentColumnsJSON: p.InstrumentColumnsJSON,
 			ShowFireCalculator: p.ShowFireCalculator, EnableBtpRanks: p.EnableBtpRanks, ActiveTab: p.ActiveTab,
-			AISettingsJSON: p.AISettingsJSON, DraftPortfoliosJSON: p.DraftPortfoliosJSON,
+			AISettingsJSON: p.AISettingsJSON, DraftPortfoliosJSON: p.DraftPortfoliosJSON, UserDescription: p.UserDescription,
 		}
 		if err := normalizeProfile(restoredProfile); err != nil {
 			return fmt.Errorf("invalid backup profile: %w", err)
@@ -311,6 +368,12 @@ func (s *Store) RestoreBackup(ctx context.Context, userID string, backupData []b
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM accounts WHERE user_id=?`, userID); err != nil {
 		return fmt.Errorf("delete accounts: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chat_sessions WHERE user_id=?`, userID); err != nil {
+		return fmt.Errorf("delete chats: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM btp_starred WHERE user_id=?`, userID); err != nil {
+		return fmt.Errorf("delete starred BTPs: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM user_profiles WHERE user_id=?`, userID); err != nil {
 		return fmt.Errorf("delete profile: %w", err)
@@ -443,6 +506,68 @@ func (s *Store) RestoreBackup(ctx context.Context, userID string, backupData []b
 		}
 	}
 
+	// Restore chats with fresh internal IDs so a portable backup cannot collide with another user.
+	restoreNonce := time.Now().UnixNano()
+	for chatIndex, chat := range backup.Chats {
+		if len(chat.Title) > 200 || len(chat.Messages) > 200 {
+			return errors.New("invalid backup chat size")
+		}
+		title := strings.TrimSpace(chat.Title)
+		if title == "" {
+			title = "New Conversation"
+		}
+		createdAt, updatedAt := chat.CreatedAt, chat.UpdatedAt
+		if createdAt == "" {
+			createdAt = now
+		}
+		if updatedAt == "" {
+			updatedAt = createdAt
+		}
+		if _, err := time.Parse(time.RFC3339Nano, createdAt); err != nil {
+			return errors.New("invalid backup chat creation time")
+		}
+		if _, err := time.Parse(time.RFC3339Nano, updatedAt); err != nil {
+			return errors.New("invalid backup chat update time")
+		}
+		sessionID := fmt.Sprintf("restored-%d-%d", restoreNonce, chatIndex)
+		if _, err := tx.ExecContext(ctx, `INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, sessionID, userID, title, createdAt, updatedAt); err != nil {
+			return fmt.Errorf("restore chat: %w", err)
+		}
+		totalSize := 0
+		for messageIndex, message := range chat.Messages {
+			if message.Role != "user" && message.Role != "assistant" && message.Role != "tool" && message.Role != "error" {
+				return errors.New("invalid backup chat role")
+			}
+			if len(message.Content) > 128<<10 || len(message.Timestamp) > 64 || len(message.ToolCallsJSON) > 128<<10 || (message.ToolCallsJSON != "" && !json.Valid([]byte(message.ToolCallsJSON))) {
+				return errors.New("invalid backup chat message")
+			}
+			totalSize += len(message.Content) + len(message.ToolCallsJSON)
+			if totalSize > 2<<20 {
+				return errors.New("invalid backup chat history size")
+			}
+			createdAt := message.CreatedAt
+			if createdAt == "" {
+				createdAt = now
+			}
+			if _, err := time.Parse(time.RFC3339Nano, createdAt); err != nil {
+				return errors.New("invalid backup chat message time")
+			}
+			messageID := fmt.Sprintf("%s-msg-%d", sessionID, messageIndex)
+			if _, err := tx.ExecContext(ctx, `INSERT INTO chat_messages (id, session_id, user_id, role, content, timestamp, tool_calls_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, messageID, sessionID, userID, message.Role, message.Content, message.Timestamp, message.ToolCallsJSON, createdAt); err != nil {
+				return fmt.Errorf("restore chat message: %w", err)
+			}
+		}
+	}
+	for _, isin := range backup.BTPStarred {
+		isin = strings.ToUpper(strings.TrimSpace(isin))
+		if len(isin) != 12 {
+			return errors.New("invalid starred BTP ISIN")
+		}
+		if _, err := tx.ExecContext(ctx, `INSERT INTO btp_starred (user_id, isin, created_at) VALUES (?, ?, ?)`, userID, isin, now); err != nil {
+			return fmt.Errorf("restore starred BTP: %w", err)
+		}
+	}
+
 	// Upsert profile.
 	if restoredProfile != nil {
 		p := restoredProfile
@@ -462,8 +587,9 @@ func (s *Store) RestoreBackup(ctx context.Context, userID string, backupData []b
 			INSERT INTO user_profiles (user_id, theme, preferred_currency, monthly_expenses_minor,
 			                           reserve_months, hide_balances, emergency_goal_minor,
 			                           fire_expenses_minor, instrument_columns_json, show_fire_calculator,
-			                           enable_btp_ranks, active_tab, ai_settings_json, draft_portfolios_json)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			                           enable_btp_ranks, active_tab, ai_settings_json, draft_portfolios_json,
+			                           user_description)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			ON CONFLICT(user_id) DO UPDATE SET
 			  theme=excluded.theme, preferred_currency=excluded.preferred_currency,
 			  monthly_expenses_minor=excluded.monthly_expenses_minor, reserve_months=excluded.reserve_months,
@@ -473,10 +599,11 @@ func (s *Store) RestoreBackup(ctx context.Context, userID string, backupData []b
 			  show_fire_calculator=excluded.show_fire_calculator,
 			  enable_btp_ranks=excluded.enable_btp_ranks, active_tab=excluded.active_tab,
 			  ai_settings_json=excluded.ai_settings_json,
-			  draft_portfolios_json=excluded.draft_portfolios_json`,
+			  draft_portfolios_json=excluded.draft_portfolios_json,
+			  user_description=excluded.user_description`,
 			userID, p.Theme, p.PreferredCurrency, p.MonthlyExpensesMinor, p.ReserveMonths,
 			hideBalances, p.EmergencyGoalMinor, p.FireExpensesMinor, p.InstrumentColumnsJSON, showFire,
-			enableBtpRanks, p.ActiveTab, p.AISettingsJSON, p.DraftPortfoliosJSON); err != nil {
+			enableBtpRanks, p.ActiveTab, p.AISettingsJSON, p.DraftPortfoliosJSON, p.UserDescription); err != nil {
 			return fmt.Errorf("upsert profile: %w", err)
 		}
 	}

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { notifications } from '@mantine/notifications';
 import { profileClient } from '../api';
 import { setHideBalancesState } from '../utils/format';
 
@@ -13,6 +14,9 @@ export type UserProfile = {
   instrument_columns_json: string;
   show_fire_calculator: boolean;
   enable_btp_ranks: boolean;
+  active_tab: string;
+  ai_settings_json: string;
+  draft_portfolios_json: string;
   user_description: string;
 };
 
@@ -27,6 +31,9 @@ const DEFAULTS: UserProfile = {
   instrument_columns_json: '',
   show_fire_calculator: false,
   enable_btp_ranks: false,
+  active_tab: 'overview',
+  ai_settings_json: '',
+  draft_portfolios_json: '',
   user_description: '',
 };
 
@@ -43,7 +50,7 @@ export async function loadProfile(): Promise<void> {
     const res = await profileClient.getProfile({});
     const p = res.profile ?? {};
     _profile = {
-      theme: p.theme ?? '',
+      theme: p.theme || `${localStorage.getItem('squirrel.scheme') || 'dark'}:${localStorage.getItem('squirrel.accent') || 'amber'}`,
       preferred_currency: p.preferredCurrency ?? '',
       monthly_expenses_minor: Number(p.monthlyExpensesMinor ?? 0),
       reserve_months: Number(p.reserveMonths ?? 6) || 6,
@@ -53,6 +60,9 @@ export async function loadProfile(): Promise<void> {
       instrument_columns_json: p.instrumentColumnsJson ?? '',
       show_fire_calculator: Boolean(p.showFireCalculator),
       enable_btp_ranks: Boolean(p.enableBtpRanks),
+      active_tab: p.activeTab ?? 'overview',
+      ai_settings_json: p.aiSettingsJson || localStorage.getItem('squirrel.aiSettings') || '',
+      draft_portfolios_json: p.draftPortfoliosJson || localStorage.getItem('squirrel.draftPortfolios') || '',
       user_description: p.userDescription ?? '',
     };
   } catch {
@@ -64,10 +74,16 @@ export async function loadProfile(): Promise<void> {
       fire_expenses_minor: Number(localStorage.getItem('squirrel.fireExpenses.EUR') || 0) * 100 || 2_400_000,
       show_fire_calculator: localStorage.getItem('squirrel.showFireCalculator') === 'true',
       enable_btp_ranks: localStorage.getItem('squirrel.enableBtpRanks') === 'true',
+      active_tab: localStorage.getItem('squirrel.activeTab') || 'overview',
+      ai_settings_json: localStorage.getItem('squirrel.aiSettings') || '',
+      draft_portfolios_json: localStorage.getItem('squirrel.draftPortfolios') || '',
     };
   }
   _loaded = true;
   localStorage.setItem('squirrel.hideBalances', String(_profile.hide_balances));
+  localStorage.setItem('squirrel.activeTab', _profile.active_tab);
+  if (_profile.ai_settings_json) localStorage.setItem('squirrel.aiSettings', _profile.ai_settings_json);
+  if (_profile.draft_portfolios_json) localStorage.setItem('squirrel.draftPortfolios', _profile.draft_portfolios_json);
   setHideBalancesState(_profile.hide_balances);
   notify();
 }
@@ -86,6 +102,9 @@ export function updateProfile(patch: Partial<UserProfile>): void {
     localStorage.setItem('squirrel.hideBalances', String(_profile.hide_balances));
     setHideBalancesState(_profile.hide_balances);
   }
+  if (patch.active_tab !== undefined) localStorage.setItem('squirrel.activeTab', _profile.active_tab);
+  if (patch.ai_settings_json !== undefined) localStorage.setItem('squirrel.aiSettings', _profile.ai_settings_json);
+  if (patch.draft_portfolios_json !== undefined) localStorage.setItem('squirrel.draftPortfolios', _profile.draft_portfolios_json);
   notify();
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
@@ -101,9 +120,18 @@ export function updateProfile(patch: Partial<UserProfile>): void {
         instrumentColumnsJson: _profile.instrument_columns_json,
         showFireCalculator: _profile.show_fire_calculator,
         enableBtpRanks: _profile.enable_btp_ranks,
+        activeTab: _profile.active_tab,
+        aiSettingsJson: _profile.ai_settings_json,
+        draftPortfoliosJson: _profile.draft_portfolios_json,
         userDescription: _profile.user_description,
       },
-    }).catch(() => { /* best-effort */ });
+    }).catch((cause: unknown) => {
+      notifications.show({
+        color: 'red',
+        title: 'Profile was not saved',
+        message: cause instanceof Error ? cause.message : String(cause),
+      });
+    });
   }, 600);
 }
 

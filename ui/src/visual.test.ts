@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { compactMoney, setHideBalancesState } from './utils/format.ts';
+import { compactMoney, localDateISO, setHideBalancesState } from './utils/format.ts';
 import { chartGeometry, chartTickIndexes, chipColor, filterChartRange, matchesExactFilters, nearestChartIndex, pageBounds, performanceMood } from './visual.ts';
 
 test('financial labels use semantic colors and unknown labels stay stable', () => {
@@ -36,6 +36,10 @@ test('compact chart labels respect hidden balance mode', () => {
   assert.equal(compactMoney(12_345_678, 'EUR'), '••••••');
   setHideBalancesState(false);
   assert.notEqual(compactMoney(12_345_678, 'EUR'), '••••••');
+});
+
+test('snapshot defaults use the local calendar date', () => {
+  assert.equal(localDateISO(new Date(2026, 0, 2, 0, 30)), '2026-01-02');
 });
 
 test('chart hover snaps to the nearest visible snapshot', () => {
@@ -78,5 +82,4 @@ test('chart ranges filter monthly observed_on dates correctly', () => {
   const maxRange = filterChartRange(monthly, 'max');
   assert.equal(maxRange.length, 31);
 });
-
 

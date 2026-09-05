@@ -154,6 +154,7 @@ export const StreamChatResponse = /*@__PURE__*/ proto3.makeMessageType(
     { no: 5, name: "tool_result_json", kind: "scalar", T: 9 /* ScalarType.STRING */ },
     { no: 6, name: "done", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
     { no: 7, name: "actual_n_ctx", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 8, name: "error_message", kind: "scalar", T: 9 /* ScalarType.STRING */ },
   ],
 );
 

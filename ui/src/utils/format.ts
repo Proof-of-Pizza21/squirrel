@@ -6,6 +6,9 @@ export const n = (value: Numeric | undefined) => (value === '' || value === unde
 export const minor = (value: Numeric | undefined) => Math.round(n(value) * 100);
 export const bps = (value: Numeric | undefined) => Math.round(n(value) * 100);
 
+export const localDateISO = (date = new Date()) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
 export const percent = (value: number | undefined) =>
   value === undefined || !Number.isFinite(value) ? '—' : `${(value / 100).toFixed(2)}%`;
 

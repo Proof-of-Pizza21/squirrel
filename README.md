@@ -47,13 +47,20 @@ The default database is `data/squirrel.db` inside the project. The entire `data/
 just test
 ```
 
+## Backups and AI safety
+
+Settings exports a versioned, user-scoped JSON backup containing accounts, holdings, snapshots, profile preferences, chat history, and starred BTPs. The file is not encrypted; configuration, API keys, and the shared instrument catalog are excluded. Restore validates the backup and replaces that user's data in one SQLite transaction.
+
+The AI consultant can inspect portfolio data through an explicit read-only MCP allowlist. It cannot create, update, or delete financial data. When optional Google authentication is configured, background AI tool calls retain the authenticated user identity; without auth, all local data uses the built-in local profile.
+
 ## Architecture
 
-- `cmd/squirrel`: application entrypoint and process lifecycle.
-- `internal/portfolio`: dependency-free financial calculations, instrument validation, and ETF ranking.
-- `internal/justetf`: user-triggered screener catalog sync, ticker/ISIN lookup, and profile parsing.
-- `internal/store`: SQLite schema and queries. It is the only package that knows SQL.
-- `internal/httpapi`: small JSON/HTTP boundary and embedded UI handler.
+- `backend/cmd/squirrel`: application entrypoint and process lifecycle.
+- `backend/internal/portfolio`: financial calculations, instrument validation, and ETF ranking.
+- `backend/internal/justetf`: user-triggered screener catalog sync, ticker/ISIN lookup, and profile parsing.
+- `backend/internal/store`: SQLite schema and queries. It is the only package that knows SQL.
+- `backend/internal/service`: Connect RPC boundary, auth-scoped orchestration, and embedded UI handler.
+- `backend/internal/mcp`: read-only AI tool schema and internal Connect bridge.
 - `ui`: React, TypeScript, Vite, and Mantine. Production assets in `ui/dist` are embedded by Go.
 
 The bank projection applies each account's marginal interest tiers, then subtracts its configured flat tax estimate and annual fee. Different currencies remain separate until FX conversion is implemented.

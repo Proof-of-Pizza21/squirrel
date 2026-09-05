@@ -93,6 +93,8 @@ message StreamChatResponse {
   bool done = 6;
   // Actual server context window detected at request time (0 if unknown).
   int32 actual_n_ctx = 7;
+  // Actionable provider or request error. A non-empty value terminates the stream.
+  string error_message = 8;
 }
 
 message RestartLocalServerRequest {
@@ -205,7 +207,7 @@ message GetChatStatusResponse {
 service SystemService {
   // Export a portable plaintext JSON backup of the current user's data.
   rpc ExportBackup(ExportBackupRequest) returns (ExportBackupResponse);
-  // Restore the database state from a backup archive.
+  // Restore the user's state from a versioned JSON backup.
   rpc RestoreBackup(RestoreBackupRequest) returns (RestoreBackupResponse);
   // List available recommended and downloaded open-weights AI models in data/models/.
   rpc ListAIModels(ListAIModelsRequest) returns (ListAIModelsResponse);

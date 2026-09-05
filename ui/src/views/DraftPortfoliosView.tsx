@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ActionIcon,
   Alert,
@@ -32,6 +32,7 @@ import { money, percent } from '../utils/format';
 import { useConfirmDelete } from '../components/ConfirmDeleteModal';
 import { ViewShell } from '../components/ViewShell';
 import { SectionHeader } from '../components/SectionHeader';
+import { getProfile, updateProfile, useProfile } from '../hooks/useProfile';
 
 export type DraftAllocation = {
   instrument_id?: number;
@@ -89,7 +90,7 @@ const DEFAULT_PRESETS: DraftPortfolio[] = [
 
 function getStoredDrafts(): DraftPortfolio[] {
   try {
-    const raw = localStorage.getItem('squirrel.draftPortfolios');
+    const raw = getProfile().draft_portfolios_json || localStorage.getItem('squirrel.draftPortfolios');
     if (!raw) return DEFAULT_PRESETS;
     const custom = JSON.parse(raw);
     return [...DEFAULT_PRESETS, ...custom];
@@ -99,12 +100,14 @@ function getStoredDrafts(): DraftPortfolio[] {
 }
 
 function saveCustomDrafts(drafts: DraftPortfolio[]) {
+  const customOnly = drafts.filter(d => !d.id.startsWith('preset-'));
+  const persisted = JSON.stringify(customOnly);
   try {
-    const customOnly = drafts.filter(d => !d.id.startsWith('preset-'));
-    localStorage.setItem('squirrel.draftPortfolios', JSON.stringify(customOnly));
+    localStorage.setItem('squirrel.draftPortfolios', persisted);
   } catch {
     /* optional */
   }
+  updateProfile({ draft_portfolios_json: persisted });
 }
 
 function PortfolioOptionContent({ draft }: { draft: DraftPortfolio }) {
@@ -142,12 +145,22 @@ export function DraftPortfoliosView({
   accounts: Account[];
   reload: () => Promise<void>;
 }) {
+  const [profile] = useProfile();
   const [drafts, setDrafts] = useState<DraftPortfolio[]>(getStoredDrafts);
   const [selectedId, setSelectedId] = useState<string>(DEFAULT_PRESETS[0].id);
   const [editModalOpened, setEditModalOpened] = useState(false);
   const [editingDraft, setEditingDraft] = useState<DraftPortfolio | null>(null);
   const [simulatedPacMonthly, setSimulatedPacMonthly] = useState<number>(300);
   const [success, setSuccess] = useState('');
+
+  useEffect(() => {
+    if (!profile.draft_portfolios_json) return;
+    try {
+      setDrafts([...DEFAULT_PRESETS, ...JSON.parse(profile.draft_portfolios_json)]);
+    } catch {
+      /* validation is enforced by the profile service */
+    }
+  }, [profile.draft_portfolios_json]);
 
   const combobox = useCombobox({ onDropdownClose: () => combobox.resetSelectedOption() });
 

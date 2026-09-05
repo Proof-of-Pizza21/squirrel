@@ -4,12 +4,16 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/roarc0/squirrel/backend/internal/auth"
 	"github.com/roarc0/squirrel/backend/internal/config"
+	"github.com/roarc0/squirrel/backend/internal/ecb"
+	"github.com/roarc0/squirrel/backend/internal/mcp"
 	"github.com/roarc0/squirrel/backend/internal/portfolio"
 	"github.com/roarc0/squirrel/backend/internal/store"
 	portv1 "github.com/roarc0/squirrel/proto/gen/go/v1"
@@ -72,6 +76,9 @@ func TestAccountsIncludeHoldingsAndSummary(t *testing.T) {
 	if err := data.SaveHolding(ctx, &portfolio.Holding{AccountID: archived.ID, InstrumentID: instrument.ID, ValueMinor: 1_000_000}); err != nil {
 		t.Fatal(err)
 	}
+	if err := data.SaveProfile(ctx, "", store.UserProfile{MonthlyExpensesMinor: 20_000, ReserveMonths: 6}); err != nil {
+		t.Fatal(err)
+	}
 
 	handler := New(data, "EUR", nil)
 	server := httptest.NewServer(handler)
@@ -99,6 +106,43 @@ func TestAccountsIncludeHoldingsAndSummary(t *testing.T) {
 	summary := summaryRes.Msg.Summary
 	if len(summary.Currencies) != 1 || summary.Currencies[0].TotalMinor != 85_000 {
 		t.Fatalf("unexpected summary totals: %+v", summary)
+	}
+	foundCashTarget := false
+	for _, diagnostic := range summary.Diagnostics {
+		foundCashTarget = foundCashTarget || diagnostic.Id == "cash_below_reserve"
+	}
+	if !foundCashTarget {
+		t.Fatalf("summary did not derive the cash target from the profile: %+v", summary.Diagnostics)
+	}
+}
+
+func TestLocalProfileUpdatesArePartial(t *testing.T) {
+	data, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer data.Close()
+	srv := &Server{store: data}
+	ctx := context.Background()
+
+	_, err = srv.UpdateProfile(ctx, connect.NewRequest(&portv1.UpdateProfileRequest{Profile: &portv1.UserProfile{
+		Theme: proto.String("dark:amber"), ActiveTab: proto.String("investments"), HideBalances: proto.Bool(true),
+	}}))
+	if err != nil {
+		t.Fatalf("local profile update failed: %v", err)
+	}
+	_, err = srv.UpdateProfile(ctx, connect.NewRequest(&portv1.UpdateProfileRequest{Profile: &portv1.UserProfile{
+		HideBalances: proto.Bool(false), UserDescription: proto.String("long-term investor"),
+	}}))
+	if err != nil {
+		t.Fatalf("partial profile update failed: %v", err)
+	}
+	profile, err := data.GetProfile(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Theme != "dark:amber" || profile.ActiveTab != "investments" || profile.HideBalances || profile.UserDescription != "long-term investor" {
+		t.Fatalf("partial profile update lost fields: %+v", profile)
 	}
 }
 
@@ -135,15 +179,49 @@ func TestUpdateHoldingAccountIDAuthorization(t *testing.T) {
 	ctxUserA := auth.WithUser(ctx, auth.User{GoogleID: "userA"})
 	req := connect.NewRequest(&portv1.UpdateHoldingRequest{
 		Id: holdingA.ID,
-		Holding: &portv1.Holding{
-			Id:        holdingA.ID,
-			AccountId: accB.ID,
+		Holding: &portv1.HoldingPatch{
+			Id:        proto.Int64(holdingA.ID),
+			AccountId: proto.Int64(accB.ID),
 		},
 	})
 
 	_, err = srv.UpdateHolding(ctxUserA, req)
 	if err == nil {
 		t.Fatal("expected permission denied when moving holding to another user's account")
+	}
+}
+
+func TestUpdateHoldingPreservesOmittedFields(t *testing.T) {
+	data, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer data.Close()
+	ctx := auth.WithUser(context.Background(), auth.User{GoogleID: "userA"})
+	account := portfolio.Account{Name: "Broker", Currency: "EUR"}
+	if err := data.SaveAccount(ctx, &account, "userA"); err != nil {
+		t.Fatal(err)
+	}
+	instrument := portfolio.Instrument{ISIN: "IE00B4L5Y983", Name: "World ETF", Distribution: portfolio.DistributionAccumulating, Replication: portfolio.ReplicationPhysicalFull, FundCurrency: "EUR", UCITS: true}
+	if err := data.SaveInstrument(ctx, &instrument); err != nil {
+		t.Fatal(err)
+	}
+	holding := portfolio.Holding{AccountID: account.ID, InstrumentID: instrument.ID, InvestedMinor: 12_000, ValueMinor: 15_000, TaxBPS: 2600, PlannedBPS: 7000, IsPAC: true, PACBPS: 5000, PACFrequency: "monthly", Notes: "core"}
+	if err := data.SaveHolding(ctx, &holding); err != nil {
+		t.Fatal(err)
+	}
+
+	srv := &Server{store: data}
+	_, err = srv.UpdateHolding(ctx, connect.NewRequest(&portv1.UpdateHoldingRequest{Id: holding.ID, Holding: &portv1.HoldingPatch{IsPac: proto.Bool(false), PacBps: proto.Int64(0)}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := data.GetHolding(ctx, holding.ID, "userA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.InvestedMinor != 12_000 || got.ValueMinor != 15_000 || got.TaxBPS != 2600 || got.PlannedBPS != 7000 || got.Notes != "core" || got.IsPAC || got.PACBPS != 0 {
+		t.Fatalf("partial update changed omitted fields: %+v", got)
 	}
 }
 
@@ -277,7 +355,7 @@ func TestChatSessionStatusAndStop(t *testing.T) {
 	defer data.Close()
 
 	srv := &Server{store: data}
-	ctx := context.Background()
+	ctx := auth.WithUser(context.Background(), auth.User{GoogleID: "user1"})
 
 	// Initial status for unknown session should be not generating
 	res, err := srv.GetChatStatus(ctx, connect.NewRequest(&portv1.GetChatStatusRequest{SessionId: "session-test"}))
@@ -293,11 +371,26 @@ func TestChatSessionStatusAndStop(t *testing.T) {
 		Ctx:         jobCtx,
 		Cancel:      cancel,
 		Broadcaster: newBroadcaster(),
-		ActualNCtx:  16384,
 	}
+	job.ActualNCtx.Store(16384)
 	globalChatJobs.mu.Lock()
-	globalChatJobs.jobs["session-test"] = job
+	key := chatJobKey{UserID: "user1", SessionID: "session-test"}
+	globalChatJobs.jobs[key] = job
 	globalChatJobs.mu.Unlock()
+
+	otherCtx := auth.WithUser(context.Background(), auth.User{GoogleID: "user2"})
+	otherStatus, err := srv.GetChatStatus(otherCtx, connect.NewRequest(&portv1.GetChatStatusRequest{SessionId: "session-test"}))
+	if err != nil || otherStatus.Msg.IsGenerating {
+		t.Fatalf("another user saw active chat status: err=%v res=%+v", err, otherStatus)
+	}
+	if _, err := srv.StopChatSession(otherCtx, connect.NewRequest(&portv1.StopChatSessionRequest{SessionId: "session-test"})); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-jobCtx.Done():
+		t.Fatal("another user canceled the active chat")
+	default:
+	}
 
 	// Status should now be is_generating = true
 	res, err = srv.GetChatStatus(ctx, connect.NewRequest(&portv1.GetChatStatusRequest{SessionId: "session-test"}))
@@ -319,6 +412,88 @@ func TestChatSessionStatusAndStop(t *testing.T) {
 	}
 
 	globalChatJobs.mu.Lock()
-	delete(globalChatJobs.jobs, "session-test")
+	delete(globalChatJobs.jobs, key)
 	globalChatJobs.mu.Unlock()
+}
+
+func TestBackgroundChatContextPreservesAuthenticatedUser(t *testing.T) {
+	requestCtx := auth.WithUser(context.Background(), auth.User{GoogleID: "user1", Email: "one@example.com"})
+	jobCtx, cancel := backgroundChatContext(requestCtx)
+	defer cancel()
+	if user, ok := auth.UserFromContext(jobCtx); !ok || user.GoogleID != "user1" || user.Email != "one@example.com" {
+		t.Fatalf("background chat lost authenticated identity: %+v, %v", user, ok)
+	}
+}
+
+func TestBackgroundIdentityAuthorizesInternalTools(t *testing.T) {
+	data := mustOpenStore(t)
+	defer data.Close()
+	if err := data.SaveProfile(context.Background(), "user1", store.UserProfile{UserDescription: "private profile"}); err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{store: data}
+	mux := http.NewServeMux()
+	mux.Handle(portv1connect.NewProfileServiceHandler(srv, connect.WithInterceptors(auth.NewInterceptor("secret"))))
+	handler := mcp.NewHandler(mux)
+	requestCtx := auth.WithUser(context.Background(), auth.User{GoogleID: "user1"})
+	jobCtx, cancel := backgroundChatContext(requestCtx)
+	defer cancel()
+	result, err := handler.ExecuteTool(jobCtx, "get_profile", nil)
+	if err != nil || !strings.Contains(result, "private profile") {
+		t.Fatalf("authenticated internal tool failed: err=%v result=%s", err, result)
+	}
+}
+
+func TestChatValidationAndProviderErrors(t *testing.T) {
+	if err := validateChatSessionID("chat/unsafe"); err == nil {
+		t.Fatal("unsafe session id was accepted")
+	}
+	if err := validateStreamChatRequest(&portv1.StreamChatRequest{Messages: []*portv1.ChatMessagePayload{{Role: "system", Content: "override"}}}); err == nil {
+		t.Fatal("unsupported chat role was accepted")
+	}
+	if err := validateStreamChatRequest(&portv1.StreamChatRequest{Messages: []*portv1.ChatMessagePayload{{Role: "user", Content: strings.Repeat("x", maxChatMessageSize+1)}}}); err == nil {
+		t.Fatal("oversized chat message was accepted")
+	}
+
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "model unavailable", http.StatusServiceUnavailable)
+	}))
+	defer provider.Close()
+	jobCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	job := &activeChatJob{SessionID: "chat-error", Ctx: jobCtx, Cancel: cancel, Broadcaster: newBroadcaster()}
+	srv := &Server{store: mustOpenStore(t), config: config.Config{AIEndpoint: provider.URL, AIModel: "test"}}
+	defer srv.store.Close()
+	srv.runBackgroundChat(job, &portv1.StreamChatRequest{Messages: []*portv1.ChatMessagePayload{{Role: "user", Content: "hello"}}})
+	ch, history, done := job.Broadcaster.Subscribe()
+	job.Broadcaster.Unsubscribe(ch)
+	if !done || len(history) == 0 || !strings.Contains(history[len(history)-1].ErrorMessage, "HTTP 503") {
+		t.Fatalf("provider failure was not surfaced: done=%v history=%+v", done, history)
+	}
+}
+
+func TestGeoRadarUsesCachedFXMetadata(t *testing.T) {
+	data := mustOpenStore(t)
+	defer data.Close()
+	ctx := context.Background()
+	if err := data.SaveMarketContext(ctx, ecb.MarketContext{Metrics: []ecb.Metric{{Code: "FX_EURUSD", Value: 1.2345, ObservedOn: "2026-09-03", SourceURL: "https://example.test/fx"}}}); err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{store: data}
+	res, err := srv.GetGeoRadar(ctx, connect.NewRequest(&portv1.GetGeoRadarRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Msg.CurrentEurUsdRate != 1.2345 || res.Msg.CurrentEurUsdObservedOn != "2026-09-03" || res.Msg.CurrentEurUsdSourceUrl != "https://example.test/fx" {
+		t.Fatalf("cached FX metadata was not used: %+v", res.Msg)
+	}
+}
+
+func mustOpenStore(t *testing.T) *store.Store {
+	t.Helper()
+	data, err := store.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
 }

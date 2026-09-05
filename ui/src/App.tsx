@@ -90,7 +90,7 @@ const normalizeTab = (tab: string | null) => tab === 'holdings' || tab === 'geo'
 import { money, investedMoney, setHideBalancesState } from './utils/format';
 import { captureTokenFromURL, clearToken, fetchMe, isUnauthenticatedError, type AuthUser } from './auth';
 import { LoginView } from './LoginView';
-import { loadProfile, useProfile } from './hooks/useProfile';
+import { loadProfile, updateProfile, useProfile } from './hooks/useProfile';
 import { handleLinkClick } from './utils/navigation';
 import { Sidebar, type ThemeAccent, type ThemeScheme, ACCENT_HEX } from './components/Sidebar';
 
@@ -372,6 +372,7 @@ export default function App() {
   const handleSidebarNavigate = (val: string | null) => {
     const nextSection = val || 'overview';
     setRoute({ section: nextSection, subtab: undefined });
+    updateProfile({ active_tab: nextSection });
     try {
       localStorage.setItem('squirrel.activeTab', nextSection);
       const url = new URL(window.location.href);
@@ -404,6 +405,15 @@ export default function App() {
 
   const [profile, setProfileField] = useProfile();
   const hideBalances = profile.hide_balances;
+
+  useEffect(() => {
+    const hasExplicitRoute = window.location.pathname.replace(/^\/+/, '') !== '' || new URLSearchParams(window.location.search).has('tab');
+    const restoredTab = normalizeTab(profile.active_tab);
+    if (!hasExplicitRoute && restoredTab && VALID_TABS.includes(restoredTab)) {
+      setRoute({ section: restoredTab });
+    }
+  }, [profile.active_tab]);
+
   const setHideBalances = (fn: boolean | ((prev: boolean) => boolean)) => {
     const next = typeof fn === 'function' ? fn(profile.hide_balances) : fn;
     setProfileField({ hide_balances: next });
@@ -429,6 +439,19 @@ export default function App() {
     setColorScheme(scheme);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    const [savedScheme, savedAccent] = profile.theme.split(':');
+    if ((savedScheme !== 'light' && savedScheme !== 'dark') || !(savedAccent in ACCENT_HEX)) return;
+    const nextAccent = savedAccent as ThemeAccent;
+    setScheme(savedScheme);
+    setAccent(nextAccent);
+    localStorage.setItem('squirrel.scheme', savedScheme);
+    localStorage.setItem('squirrel.accent', nextAccent);
+    applyAccentVars(nextAccent);
+    document.documentElement.setAttribute('data-accent', nextAccent);
+    setColorScheme(savedScheme);
+  }, [profile.theme, setColorScheme]);
 
   const applyTheme = (s: ThemeScheme, a: ThemeAccent) => {
     setScheme(s);

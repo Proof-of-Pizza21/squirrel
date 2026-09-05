@@ -349,18 +349,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 
   // Summary
   if (path === '/api/summary' && method === 'GET') {
-    let targetCashMinor: bigint | undefined = undefined;
-    try {
-      const exp = Number(localStorage.getItem('squirrel.monthlyExpenses') || 0);
-      const months = Number(localStorage.getItem('squirrel.reserveMonths') || 6);
-      if (exp > 0) {
-        targetCashMinor = BigInt(Math.round(exp * months * 100));
-      }
-    } catch { /* optional */ }
-
-    const res = await summaryClient.getSummary({
-      targetCashMinor: targetCashMinor,
-    });
+    const res = await summaryClient.getSummary({});
     const summary: Summary = {
       base_currency: res.summary?.baseCurrency ?? 'EUR',
       currencies: (res.summary?.currencies ?? []).map((c: any) => ({
@@ -852,6 +841,9 @@ export async function* streamChat(
   );
 
   for await (const chunk of stream) {
+    if (chunk.errorMessage) {
+      throw new Error(chunk.errorMessage);
+    }
     yield {
       deltaText: chunk.deltaText ?? '',
       isMcpToolCall: Boolean(chunk.isMcpToolCall),
@@ -1060,12 +1052,16 @@ export type GeoRadarResult = {
   currencies: CurrencyExposure[];
   diagnostics: Diagnostic[];
   current_eur_usd_rate: number;
+  current_eur_usd_observed_on: string;
+  current_eur_usd_source_url: string;
 };
 
 export async function getGeoRadar(includeCash = false): Promise<GeoRadarResult> {
   const res = await summaryClient.getGeoRadar({ includeCash });
   return {
-    current_eur_usd_rate: Number(res.currentEurUsdRate ?? 1.08),
+    current_eur_usd_rate: Number(res.currentEurUsdRate),
+    current_eur_usd_observed_on: res.currentEurUsdObservedOn ?? '',
+    current_eur_usd_source_url: res.currentEurUsdSourceUrl ?? '',
     regions: (res.regions ?? []).map((r: any) => ({
       region: r.region,
       value_minor: Number(r.valueMinor),

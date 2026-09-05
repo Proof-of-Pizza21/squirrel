@@ -34,13 +34,11 @@ func (s *Store) GetProfile(ctx context.Context, userID string) (UserProfile, err
 	if errors.Is(err, sql.ErrNoRows) {
 		return UserProfile{ReserveMonths: 6, ActiveTab: "overview"}, nil
 	}
+	p.AISettingsJSON = stripAIAPIKey(p.AISettingsJSON)
 	return p, err
 }
 
 func (s *Store) SaveProfile(ctx context.Context, userID string, p UserProfile) error {
-	if userID == "" {
-		return errors.New("user_id required")
-	}
 	if err := normalizeProfile(&p); err != nil {
 		return err
 	}
@@ -83,6 +81,7 @@ func normalizeProfile(p *UserProfile) error {
 			return fmt.Errorf("%s must be valid JSON no larger than 1 MiB", name)
 		}
 	}
+	p.AISettingsJSON = stripAIAPIKey(p.AISettingsJSON)
 	if len(p.UserDescription) > 1<<20 {
 		return errors.New("user description must not exceed 1 MiB")
 	}
@@ -93,4 +92,18 @@ func normalizeProfile(p *UserProfile) error {
 		p.ActiveTab = "overview"
 	}
 	return nil
+}
+
+func stripAIAPIKey(raw string) string {
+	var settings map[string]json.RawMessage
+	if raw == "" || json.Unmarshal([]byte(raw), &settings) != nil {
+		return raw
+	}
+	delete(settings, "apiKey")
+	delete(settings, "api_key")
+	clean, err := json.Marshal(settings)
+	if err != nil {
+		return raw
+	}
+	return string(clean)
 }

@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,7 +20,13 @@ func (s *Store) SaveSnapshot(ctx context.Context, observedOn string, userID stri
 		return err
 	}
 	defer tx.Rollback()
+	if err := saveSnapshotTx(ctx, tx, observedOn, userID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
+func saveSnapshotTx(ctx context.Context, tx *sql.Tx, observedOn string, userID string) error {
 	userFilter := ` AND user_id=?`
 	userArgs := []any{userID}
 
@@ -54,7 +61,7 @@ func (s *Store) SaveSnapshot(ctx context.Context, observedOn string, userID stri
 		append([]any{snapshotID}, userArgs...)...); err != nil {
 		return err
 	}
-	return tx.Commit()
+	return nil
 }
 
 func (s *Store) ListSnapshots(ctx context.Context, userID string) ([]portfolio.Snapshot, error) {
@@ -146,6 +153,14 @@ func (s *Store) DeleteSnapshot(ctx context.Context, id int64, userID string) err
 }
 
 func (s *Store) UpdateSituation(ctx context.Context, userID string, accountUpdates map[int64]int64, holdingValueUpdates map[int64]int64, holdingInvestedUpdates map[int64]*int64, saveSnapshot bool, observedOn string) (bool, error) {
+	if saveSnapshot {
+		if observedOn == "" {
+			observedOn = time.Now().Format(time.DateOnly)
+		}
+		if _, err := time.Parse(time.DateOnly, observedOn); err != nil {
+			return false, errors.New("snapshot date must use YYYY-MM-DD")
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return false, err
@@ -197,19 +212,13 @@ func (s *Store) UpdateSituation(ctx context.Context, userID string, accountUpdat
 		}
 	}
 
+	if saveSnapshot {
+		if err := saveSnapshotTx(ctx, tx, observedOn, userID); err != nil {
+			return false, fmt.Errorf("save snapshot: %w", err)
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return false, err
 	}
-
-	if saveSnapshot {
-		if observedOn == "" {
-			observedOn = time.Now().Format(time.DateOnly)
-		}
-		if err := s.SaveSnapshot(ctx, observedOn, userID); err != nil {
-			return false, fmt.Errorf("save snapshot: %w", err)
-		}
-		return true, nil
-	}
-
-	return false, nil
+	return saveSnapshot, nil
 }

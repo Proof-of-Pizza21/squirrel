@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Badge, Card, Group, Loader, Paper, Progress, SegmentedControl, SimpleGrid, Slider, Stack, Table, Text } from '@mantine/core';
+import { Alert, Anchor, Badge, Card, Group, Loader, Paper, Progress, SegmentedControl, SimpleGrid, Slider, Stack, Table, Text } from '@mantine/core';
 import { IconAdjustmentsHorizontal, IconAlertTriangle, IconGlobe, IconWorldLatitude } from '@tabler/icons-react';
 
 import { getGeoRadar, type GeoRadarResult } from '../api';
@@ -45,8 +45,13 @@ export function GeoRadarSection() {
       <Group justify="space-between" align="center" wrap="wrap">
         <Group gap="xs" align="center">
           <Badge color="blue" variant="light" leftSection={<IconWorldLatitude size={12} />}>
-            {data ? `EUR/USD ${data.current_eur_usd_rate.toFixed(4)}` : 'Live FX Data'}
+            {data ? `EUR/USD ${data.current_eur_usd_rate.toFixed(4)}` : 'FX Data'}
           </Badge>
+          {data?.current_eur_usd_observed_on && (
+            <Text size="xs" c="dimmed">
+              As of {data.current_eur_usd_observed_on}{data.current_eur_usd_source_url && <> · <Anchor href={data.current_eur_usd_source_url} target="_blank" rel="noreferrer">source</Anchor></>}
+            </Text>
+          )}
           <Text size="xs" c="dimmed">Look through ETFs to analyze geographic breakdown & currency sensitivity.</Text>
         </Group>
         <SegmentedControl
@@ -240,4 +245,3 @@ export function GeoRadarView() {
     </ViewShell>
   );
 }
-

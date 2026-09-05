@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/roarc0/squirrel/backend/internal/auth"
 	"github.com/roarc0/squirrel/backend/internal/store"
@@ -18,67 +19,88 @@ func (s *Server) GetProfile(ctx context.Context, _ *connect.Request[portv1.GetPr
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&portv1.GetProfileResponse{
-		Profile: &portv1.UserProfile{
-			Theme:                 p.Theme,
-			PreferredCurrency:     p.PreferredCurrency,
-			MonthlyExpensesMinor:  p.MonthlyExpensesMinor,
-			ReserveMonths:         p.ReserveMonths,
-			HideBalances:          p.HideBalances,
-			EmergencyGoalMinor:    p.EmergencyGoalMinor,
-			FireExpensesMinor:     p.FireExpensesMinor,
-			InstrumentColumnsJson: p.InstrumentColumnsJSON,
-			ShowFireCalculator:    p.ShowFireCalculator,
-			EnableBtpRanks:        p.EnableBtpRanks,
-			ActiveTab:             p.ActiveTab,
-			AiSettingsJson:        p.AISettingsJSON,
-			DraftPortfoliosJson:   p.DraftPortfoliosJSON,
-			UserDescription:       p.UserDescription,
-		},
+		Profile: profileToProto(p),
 	}), nil
 }
 
 func (s *Server) UpdateProfile(ctx context.Context, req *connect.Request[portv1.UpdateProfileRequest]) (*connect.Response[portv1.UpdateProfileResponse], error) {
 	userID := auth.UserIDOrEmpty(ctx)
-	if userID == "" {
+	if userID == "" && s.config.Auth.SessionSecret != "" {
 		return nil, connect.NewError(connect.CodeUnauthenticated, auth.ErrUnauthenticated)
 	}
 	if req.Msg.Profile == nil {
 		return nil, connect.NewError(connect.CodeInvalidArgument, errors.New("profile is required"))
 	}
-	var p store.UserProfile
-	p.Theme = req.Msg.Profile.Theme
-	p.PreferredCurrency = req.Msg.Profile.PreferredCurrency
-	p.MonthlyExpensesMinor = req.Msg.Profile.MonthlyExpensesMinor
-	p.ReserveMonths = req.Msg.Profile.ReserveMonths
-	p.HideBalances = req.Msg.Profile.HideBalances
-	p.EmergencyGoalMinor = req.Msg.Profile.EmergencyGoalMinor
-	p.FireExpensesMinor = req.Msg.Profile.FireExpensesMinor
-	p.InstrumentColumnsJSON = req.Msg.Profile.InstrumentColumnsJson
-	p.ShowFireCalculator = req.Msg.Profile.ShowFireCalculator
-	p.EnableBtpRanks = req.Msg.Profile.EnableBtpRanks
-	p.ActiveTab = req.Msg.Profile.ActiveTab
-	p.AISettingsJSON = req.Msg.Profile.AiSettingsJson
-	p.DraftPortfoliosJSON = req.Msg.Profile.DraftPortfoliosJson
-	p.UserDescription = req.Msg.Profile.UserDescription
+	p, err := s.store.GetProfile(ctx, userID)
+	if err != nil {
+		return nil, connect.NewError(connect.CodeInternal, err)
+	}
+	applyProfilePatch(&p, req.Msg.Profile)
 	if err := s.store.SaveProfile(ctx, userID, p); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err)
+	}
+	p, err = s.store.GetProfile(ctx, userID)
+	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 	return connect.NewResponse(&portv1.UpdateProfileResponse{
-		Profile: &portv1.UserProfile{
-			Theme:                 p.Theme,
-			PreferredCurrency:     p.PreferredCurrency,
-			MonthlyExpensesMinor:  p.MonthlyExpensesMinor,
-			ReserveMonths:         p.ReserveMonths,
-			HideBalances:          p.HideBalances,
-			EmergencyGoalMinor:    p.EmergencyGoalMinor,
-			FireExpensesMinor:     p.FireExpensesMinor,
-			InstrumentColumnsJson: p.InstrumentColumnsJSON,
-			ShowFireCalculator:    p.ShowFireCalculator,
-			EnableBtpRanks:        p.EnableBtpRanks,
-			ActiveTab:             p.ActiveTab,
-			AiSettingsJson:        p.AISettingsJSON,
-			DraftPortfoliosJson:   p.DraftPortfoliosJSON,
-			UserDescription:       p.UserDescription,
-		},
+		Profile: profileToProto(p),
 	}), nil
+}
+
+func applyProfilePatch(p *store.UserProfile, patch *portv1.UserProfile) {
+	if patch.Theme != nil {
+		p.Theme = *patch.Theme
+	}
+	if patch.PreferredCurrency != nil {
+		p.PreferredCurrency = *patch.PreferredCurrency
+	}
+	if patch.MonthlyExpensesMinor != nil {
+		p.MonthlyExpensesMinor = *patch.MonthlyExpensesMinor
+	}
+	if patch.ReserveMonths != nil {
+		p.ReserveMonths = *patch.ReserveMonths
+	}
+	if patch.HideBalances != nil {
+		p.HideBalances = *patch.HideBalances
+	}
+	if patch.EmergencyGoalMinor != nil {
+		p.EmergencyGoalMinor = *patch.EmergencyGoalMinor
+	}
+	if patch.FireExpensesMinor != nil {
+		p.FireExpensesMinor = *patch.FireExpensesMinor
+	}
+	if patch.InstrumentColumnsJson != nil {
+		p.InstrumentColumnsJSON = *patch.InstrumentColumnsJson
+	}
+	if patch.ShowFireCalculator != nil {
+		p.ShowFireCalculator = *patch.ShowFireCalculator
+	}
+	if patch.EnableBtpRanks != nil {
+		p.EnableBtpRanks = *patch.EnableBtpRanks
+	}
+	if patch.ActiveTab != nil {
+		p.ActiveTab = *patch.ActiveTab
+	}
+	if patch.AiSettingsJson != nil {
+		p.AISettingsJSON = *patch.AiSettingsJson
+	}
+	if patch.DraftPortfoliosJson != nil {
+		p.DraftPortfoliosJSON = *patch.DraftPortfoliosJson
+	}
+	if patch.UserDescription != nil {
+		p.UserDescription = *patch.UserDescription
+	}
+}
+
+func profileToProto(p store.UserProfile) *portv1.UserProfile {
+	return &portv1.UserProfile{
+		Theme: proto.String(p.Theme), PreferredCurrency: proto.String(p.PreferredCurrency),
+		MonthlyExpensesMinor: proto.Int64(p.MonthlyExpensesMinor), ReserveMonths: proto.Int32(p.ReserveMonths),
+		HideBalances: proto.Bool(p.HideBalances), EmergencyGoalMinor: proto.Int64(p.EmergencyGoalMinor),
+		FireExpensesMinor: proto.Int64(p.FireExpensesMinor), InstrumentColumnsJson: proto.String(p.InstrumentColumnsJSON),
+		ShowFireCalculator: proto.Bool(p.ShowFireCalculator), EnableBtpRanks: proto.Bool(p.EnableBtpRanks),
+		ActiveTab: proto.String(p.ActiveTab), AiSettingsJson: proto.String(p.AISettingsJSON),
+		DraftPortfoliosJson: proto.String(p.DraftPortfoliosJSON), UserDescription: proto.String(p.UserDescription),
+	}
 }

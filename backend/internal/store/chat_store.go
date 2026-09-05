@@ -3,9 +3,12 @@ package store
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 )
+
+var ErrChatSessionOwnerMismatch = errors.New("chat session belongs to another user")
 
 type ChatMessageRecord struct {
 	ID            string    `json:"id"`
@@ -67,7 +70,7 @@ func (s *Store) GetChatSession(ctx context.Context, id string, userID string) (*
 		return nil, fmt.Errorf("get chat session: %w", err)
 	}
 
-	rows, err := s.db.QueryContext(ctx, `SELECT id, session_id, user_id, role, content, timestamp, tool_calls_json, created_at FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC`, id)
+	rows, err := s.db.QueryContext(ctx, `SELECT id, session_id, user_id, role, content, timestamp, tool_calls_json, created_at FROM chat_messages WHERE session_id=? AND user_id=? ORDER BY created_at ASC`, id, userID)
 	if err != nil {
 		return nil, fmt.Errorf("query chat messages: %w", err)
 	}
@@ -95,19 +98,25 @@ func (s *Store) SaveChatSession(ctx context.Context, session *ChatSessionRecord)
 	defer tx.Rollback()
 
 	now := time.Now().UTC()
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?)
-		ON CONFLICT(id) DO UPDATE SET
-			title = excluded.title,
-			updated_at = excluded.updated_at
-	`, session.ID, session.UserID, session.Title, now, now)
-	if err != nil {
-		return fmt.Errorf("upsert chat session: %w", err)
+	var owner string
+	err = tx.QueryRowContext(ctx, `SELECT user_id FROM chat_sessions WHERE id=?`, session.ID).Scan(&owner)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if _, err := tx.ExecContext(ctx, `INSERT INTO chat_sessions (id, user_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, session.ID, session.UserID, session.Title, now, now); err != nil {
+			return fmt.Errorf("insert chat session: %w", err)
+		}
+	case err != nil:
+		return fmt.Errorf("read chat session owner: %w", err)
+	case owner != session.UserID:
+		return ErrChatSessionOwnerMismatch
+	default:
+		if _, err := tx.ExecContext(ctx, `UPDATE chat_sessions SET title=?, updated_at=? WHERE id=? AND user_id=?`, session.Title, now, session.ID, session.UserID); err != nil {
+			return fmt.Errorf("update chat session: %w", err)
+		}
 	}
 
 	// Delete old messages to replace with current message history
-	if _, err := tx.ExecContext(ctx, `DELETE FROM chat_messages WHERE session_id = ?`, session.ID); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM chat_messages WHERE session_id=? AND user_id=?`, session.ID, session.UserID); err != nil {
 		return fmt.Errorf("delete old chat messages: %w", err)
 	}
 
@@ -124,10 +133,7 @@ func (s *Store) SaveChatSession(ctx context.Context, session *ChatSessionRecord)
 		if msg.Role == "assistant" && len(msg.Content) == 0 && len(msg.ToolCallsJSON) == 0 {
 			continue
 		}
-		msgID := msg.ID
-		if msgID == "" {
-			msgID = fmt.Sprintf("%s-%d", session.ID, i)
-		}
+		msgID := fmt.Sprintf("%s-msg-%d", session.ID, i)
 		createdAt := msg.CreatedAt
 		if createdAt.IsZero() {
 			createdAt = now

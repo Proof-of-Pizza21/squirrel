@@ -447,6 +447,13 @@ export declare class StreamChatResponse extends Message<StreamChatResponse> {
    */
   actualNCtx: number;
 
+  /**
+   * Actionable provider or request error. A non-empty value terminates the stream.
+   *
+   * @generated from field: string error_message = 8;
+   */
+  errorMessage: string;
+
   constructor(data?: PartialMessage<StreamChatResponse>);
 
   static readonly runtime: typeof proto3;

@@ -7,33 +7,33 @@ option go_package = "github.com/roarc0/squirrel/proto/gen/go/v1;portv1";
 // UserProfile stores per-user application preferences.
 message UserProfile {
   // UI color scheme: "light", "dark", or "" for system default.
-  string theme = 1;
+  optional string theme = 1;
   // Preferred display currency code e.g. "EUR", "USD".
-  string preferred_currency = 2;
+  optional string preferred_currency = 2;
   // Monthly living expenses in minor units (cents) for emergency reserve calculation.
-  int64 monthly_expenses_minor = 3;
+  optional int64 monthly_expenses_minor = 3;
   // Number of months of expenses to target as emergency reserve (default 6).
-  int32 reserve_months = 4;
+  optional int32 reserve_months = 4;
   // Whether to hide monetary balances in the UI.
-  bool hide_balances = 5;
+  optional bool hide_balances = 5;
   // Target emergency cash reserve in minor units (cents).
-  int64 emergency_goal_minor = 6;
+  optional int64 emergency_goal_minor = 6;
   // Annual expenses for FIRE calculation in minor units (cents).
-  int64 fire_expenses_minor = 7;
+  optional int64 fire_expenses_minor = 7;
   // JSON string of visible instrument column IDs for the instrument finder.
-  string instrument_columns_json = 8;
+  optional string instrument_columns_json = 8;
   // Whether to show the FIRE / financial independence calculator on the Overview.
-  bool show_fire_calculator = 9;
+  optional bool show_fire_calculator = 9;
   // Whether to enable the BTP Rank plugin section.
-  bool enable_btp_ranks = 10;
+  optional bool enable_btp_ranks = 10;
   // Currently active navigation tab e.g. "overview", "investments", "btp".
-  string active_tab = 11;
+  optional string active_tab = 11;
   // JSON string of AI Assistant configuration settings.
-  string ai_settings_json = 12;
+  optional string ai_settings_json = 12;
   // JSON string of custom draft portfolios.
-  string draft_portfolios_json = 13;
+  optional string draft_portfolios_json = 13;
   // User description detailing investment objectives, risk exposure/tolerance, age, sex/gender, time horizon, etc.
-  string user_description = 14;
+  optional string user_description = 14;
 }
 
 message GetProfileRequest {}

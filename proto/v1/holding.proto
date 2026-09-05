@@ -65,12 +65,28 @@ message CreateHoldingResponse {
   Holding holding = 1;
 }
 
+// HoldingPatch contains only fields that may be changed on an existing holding.
+// Optional presence distinguishes an omitted field from an explicit zero/false value.
+message HoldingPatch {
+  optional int64 id = 1;
+  optional int64 account_id = 2;
+  optional int64 instrument_id = 3;
+  optional int64 invested_minor = 11;
+  optional int64 value_minor = 12;
+  optional int64 tax_bps = 13;
+  optional int64 planned_bps = 14;
+  optional bool is_pac = 17;
+  optional int64 pac_bps = 18;
+  optional string pac_frequency = 19;
+  optional string notes = 20;
+}
+
 message UpdateHoldingRequest {
   // ID of the holding to update. If zero, holding.id is used instead.
   int64 id = 1;
   // Fields to update — only set what you want to change (e.g. pac_bps=0, is_pac=false).
   // All percentage/monetary values are in basis points: 10000=100%, 5000=50%, 0=0%.
-  Holding holding = 2;
+  HoldingPatch holding = 2;
 }
 
 message UpdateHoldingResponse {

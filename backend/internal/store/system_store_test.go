@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"testing"
@@ -41,9 +42,15 @@ func TestExportAndRestoreBackup(t *testing.T) {
 			t.Fatalf("SaveSnapshot: %v", err)
 		}
 	}
-	profile := UserProfile{ReserveMonths: 9, EnableBtpRanks: true, ActiveTab: "btp", AISettingsJSON: `{"provider":"local"}`, DraftPortfoliosJSON: `[{"name":"test"}]`}
+	profile := UserProfile{ReserveMonths: 9, EnableBtpRanks: true, ActiveTab: "btp", AISettingsJSON: `{"provider":"local","apiKey":"secret"}`, DraftPortfoliosJSON: `[{"name":"test"}]`, UserDescription: "long-term investor"}
 	if err := s1.SaveProfile(ctx, "testuser", profile); err != nil {
 		t.Fatalf("SaveProfile: %v", err)
+	}
+	if err := s1.SaveChatSession(ctx, &ChatSessionRecord{ID: "chat-source", UserID: "testuser", Title: "Allocation", Messages: []ChatMessageRecord{{Role: "user", Content: "How am I allocated?", Timestamp: "12:00"}, {Role: "assistant", Content: "Mostly equities.", Timestamp: "12:01"}}}); err != nil {
+		t.Fatalf("SaveChatSession: %v", err)
+	}
+	if _, err := s1.DB().ExecContext(ctx, `INSERT INTO btp_starred (user_id, isin, created_at) VALUES (?, ?, ?)`, "testuser", "IT0000000001", "2026-09-04T12:00:00Z"); err != nil {
+		t.Fatalf("Star BTP: %v", err)
 	}
 
 	// Export backup
@@ -55,6 +62,9 @@ func TestExportAndRestoreBackup(t *testing.T) {
 
 	if len(tarGzBytes) == 0 || filename == "" {
 		t.Fatalf("ExportBackup returned empty bytes or filename")
+	}
+	if bytes.Contains(tarGzBytes, []byte("secret")) {
+		t.Fatal("backup exported an AI API key")
 	}
 
 	// 2. Restore backup into a new target database
@@ -89,8 +99,16 @@ func TestExportAndRestoreBackup(t *testing.T) {
 		t.Fatalf("Unexpected snapshots in restored db: err=%v snapshots=%+v", err, snapshots)
 	}
 	restoredProfile, err := s2.GetProfile(ctx, "testuser")
-	if err != nil || restoredProfile.ReserveMonths != 9 || !restoredProfile.EnableBtpRanks || restoredProfile.ActiveTab != "btp" || restoredProfile.AISettingsJSON == "" || restoredProfile.DraftPortfoliosJSON == "" {
+	if err != nil || restoredProfile.ReserveMonths != 9 || !restoredProfile.EnableBtpRanks || restoredProfile.ActiveTab != "btp" || restoredProfile.AISettingsJSON == "" || bytes.Contains([]byte(restoredProfile.AISettingsJSON), []byte("secret")) || restoredProfile.DraftPortfoliosJSON == "" || restoredProfile.UserDescription != "long-term investor" {
 		t.Fatalf("Unexpected restored profile: err=%v profile=%+v", err, restoredProfile)
+	}
+	chats, err := s2.ListChatSessions(ctx, "testuser")
+	if err != nil || len(chats) != 1 || chats[0].Title != "Allocation" || chats[0].MessageCount != 2 {
+		t.Fatalf("Unexpected restored chats: err=%v chats=%+v", err, chats)
+	}
+	var starred int
+	if err := s2.DB().QueryRowContext(ctx, `SELECT COUNT(*) FROM btp_starred WHERE user_id=? AND isin=?`, "testuser", "IT0000000001").Scan(&starred); err != nil || starred != 1 {
+		t.Fatalf("Unexpected restored starred BTP: err=%v count=%d", err, starred)
 	}
 }
 

@@ -49,26 +49,21 @@ var protoComments = func() map[string]string {
 	return m
 }()
 
-// allowedServices is the set of service full names exposed as MCP tools.
-var allowedServices = map[protoreflect.FullName]bool{
-	"v1.HoldingService":    true,
-	"v1.AccountService":    true,
-	"v1.InstrumentService": true,
-	"v1.SummaryService":    true,
-	"v1.SnapshotService":   true,
-	"v1.RateService":       true,
-	"v1.ProfileService":    true,
-}
-
-// deniedMethods is the set of full method names that should NOT be exposed.
-var deniedMethods = map[protoreflect.FullName]bool{
-	"v1.InstrumentService.SyncInstrumentCatalog":    true,
-	"v1.InstrumentService.EnrichInstrumentCatalog":  true,
-	"v1.InstrumentService.StreamInstrumentCatalog":  true,
-	"v1.InstrumentService.ImportInstruments":        true,
-	"v1.InstrumentService.StarInstrument":           true,
+// allowedMethods is deliberately read-only. New RPCs are not exposed to AI by default.
+var allowedMethods = map[protoreflect.FullName]bool{
+	"v1.HoldingService.ListHoldings":                 true,
+	"v1.AccountService.ListAccounts":                 true,
+	"v1.InstrumentService.SearchInstruments":         true,
+	"v1.InstrumentService.RankInstruments":           true,
+	"v1.InstrumentService.LookupInstrument":          true,
 	"v1.InstrumentService.GetInstrumentAlternatives": true,
-	"v1.InstrumentService.ListInstruments":          true, // too large; use search/lookup instead
+	"v1.SummaryService.GetSummary":                   true,
+	"v1.SummaryService.GetGeoRadar":                  true,
+	"v1.SnapshotService.ListSnapshots":               true,
+	"v1.RateService.ListReferenceRates":              true,
+	"v1.RateService.GetMarketContext":                true,
+	"v1.RateService.ListTaxRates":                    true,
+	"v1.ProfileService.GetProfile":                   true,
 }
 
 // buildToolsFromProto discovers all allowed unary RPC methods from the global proto registry
@@ -83,16 +78,13 @@ func buildToolsFromProto() []ToolDefinition {
 		services := fd.Services()
 		for i := 0; i < services.Len(); i++ {
 			sd := services.Get(i)
-			if !allowedServices[sd.FullName()] {
-				continue
-			}
 			methods := sd.Methods()
 			for j := 0; j < methods.Len(); j++ {
 				md := methods.Get(j)
 				if md.IsStreamingClient() || md.IsStreamingServer() {
 					continue
 				}
-				if deniedMethods[md.FullName()] {
+				if !allowedMethods[md.FullName()] {
 					continue
 				}
 				tools = append(tools, toolFromMethod(md))

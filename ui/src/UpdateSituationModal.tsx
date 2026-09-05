@@ -17,6 +17,7 @@ import {
 } from '@mantine/core';
 import { updateSituation, type Account, type Holding } from './api';
 import { notifications } from '@mantine/notifications';
+import { localDateISO } from './utils/format';
 
 type Props = {
   opened: boolean;
@@ -42,7 +43,7 @@ export function UpdateSituationModal({ opened, onClose, accounts, holdings, relo
   const [holdingValues, setHoldingValues] = useState<Record<number, number>>({});
   const [holdingReturns, setHoldingReturns] = useState<Record<number, number | ''>>({});
   const [saveSnapshot, setSaveSnapshot] = useState(true);
-  const [observedOn, setObservedOn] = useState(() => new Date().toISOString().split('T')[0]);
+  const [observedOn, setObservedOn] = useState(localDateISO);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -70,7 +71,7 @@ export function UpdateSituationModal({ opened, onClose, accounts, holdings, relo
       setHoldingReturns(initialReturns);
 
       setSaveSnapshot(true);
-      setObservedOn(new Date().toISOString().split('T')[0]);
+      setObservedOn(localDateISO());
     }
   }, [opened, accounts, holdings]);
 

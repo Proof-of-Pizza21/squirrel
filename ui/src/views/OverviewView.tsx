@@ -24,7 +24,7 @@ import { AllocationBar, PerformanceResult, useBackendRows } from '../App';
 import { Empty } from '../components/Empty';
 import { DataTable, TableAction, TableActions, type DataColumn } from '../DataTable';
 import { IconAlertTriangle, IconChartPie, IconPencil, IconTrash } from '@tabler/icons-react';
-import { compactMoney, investedMoney, label, money } from '../utils/format';
+import { compactMoney, investedMoney, label, localDateISO, money } from '../utils/format';
 import { chartGeometry, filterChartRange, nearestChartIndex, type ChartRange } from '../visual';
 import { useConfirmDelete } from '../components/ConfirmDeleteModal';
 import { useProfile } from '../hooks/useProfile';
@@ -421,7 +421,7 @@ export function OverviewView({
 }
 
 function SnapshotHistory({ snapshots, currency, reload }: { snapshots: Snapshot[]; currency: string; reload: () => Promise<void> }) {
-  const [observedOn, setObservedOn] = useState(new Date().toISOString().slice(0, 10));
+  const [observedOn, setObservedOn] = useState(localDateISO);
   const [saving, setSaving] = useState(false);
   const [editing, setEditing] = useState<Snapshot>();
   const [error, setError] = useState('');

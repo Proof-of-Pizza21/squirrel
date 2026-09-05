@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/roarc0/squirrel/backend/internal/mcp"
@@ -86,6 +87,19 @@ func TestMCPHandlerToolsList(t *testing.T) {
 	tools := result["tools"].([]interface{})
 	if len(tools) == 0 {
 		t.Errorf("expected tools list to contain tools, got 0")
+	}
+}
+
+func TestMCPToolsAreReadOnly(t *testing.T) {
+	handler := mcp.NewHandler(&dummyHandler{})
+	for _, tool := range handler.OpenAITools() {
+		fn := tool["function"].(map[string]interface{})
+		name := fn["name"].(string)
+		for _, prefix := range []string{"create_", "update_", "delete_", "save_", "restore_", "import_", "sync_", "enrich_", "star_", "refresh_"} {
+			if strings.HasPrefix(name, prefix) {
+				t.Fatalf("AI tool %q is not read-only", name)
+			}
+		}
 	}
 }
 
