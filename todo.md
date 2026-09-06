@@ -22,15 +22,15 @@ Reviewed 2026-09-04 across the Go services/store/domain, protobuf and Connect bo
 
 ## P1 — UI and accessibility
 
-- [ ] **Build a real narrow-screen navigation.** At `<=768px` the sticky sidebar still reserves 70–256 px, leaving too little content at phone widths. Use the existing Mantine drawer/burger pattern and persist collapse only on desktop.
-- [ ] **Make invisible controls keyboard-visible.** Reveal table actions on `:focus-within`, add accessible names to icon-only controls, mark decorative SVGs appropriately, and honor `prefers-reduced-motion`.
+- [x] **Build a real narrow-screen navigation.** Phone layouts now use a labelled Mantine burger/drawer around the existing sidebar; navigation closes the drawer and desktop collapse remains independently persisted.
+- [x] **Make invisible controls keyboard-visible.** Table actions reveal on `:focus-within`, icon-only controls have accessible names, decorative SVGs are hidden from assistive technology, and reduced-motion preferences are honored.
 - [ ] **Show persistence and recovery states.** Replace best-effort silent saves with saving/saved/error feedback; add Retry to initial-load errors and keep the last usable data on refresh failures.
 - [ ] **Apply display preferences consistently.** Restore theme/accent from the profile, use the selected currency symbol instead of hard-coded `€` in Settings, and explain when figures remain in their original currency.
 
 ## P1 — Tests and delivery
 
-- [ ] **Make the default test suite hermetic.** `TestLiveFetchMarketContext` and `TestMCPWebSearchTool` call live services; move live probes behind an integration flag/tag and use `httptest` by default. `just test` currently fails offline while short/race tests and UI checks pass.
-- [ ] **Add CI for the existing quality gates.** Run protobuf generation consistency, `go vet`, offline Go tests, the race suite where practical, TypeScript checking, and UI tests on every change.
+- [x] **Make the default test suite hermetic.** ECB and MCP defaults use local fixtures/`httptest`, live probes require `SQUIRREL_INTEGRATION=1`, and `just test` no longer regenerates or builds as a side effect.
+- [x] **Add CI for the existing quality gates.** GitHub Actions checks protobuf generation drift, Go test/vet/race, TypeScript, UI tests, and the production build.
 - [ ] **Add financial golden cases.** Lock down tiered interest/tax rounding, allocation totals, BTP yield/duration/scoring boundaries, matured/zero-coupon bonds, multi-currency separation, and backup/restore fidelity.
 - [ ] **Add a few high-value UI flow tests.** Cover update-situation, destructive confirmation, profile save failure, backup restore, and AI tool confirmation; avoid broad snapshot testing.
 

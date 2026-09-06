@@ -564,6 +564,7 @@ export function DraftPortfoliosView({
                     color="red"
                     variant="subtle"
                     mb={2}
+                    aria-label="Remove allocation"
                     onClick={() =>
                       setEditingDraft(curr =>
                         curr ? { ...curr, allocations: curr.allocations.filter((_, i) => i !== idx) } : null

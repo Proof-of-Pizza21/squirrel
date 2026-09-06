@@ -231,6 +231,7 @@ export function BtpRankView() {
           <ActionIcon
             variant="subtle"
             color={btp.is_starred ? 'yellow' : 'gray'}
+            aria-label={btp.is_starred ? 'Remove from starred' : 'Star this BTP'}
             onClick={() => void handleToggleStar(btp.isin, btp.is_starred)}
           >
             {btp.is_starred ? (
@@ -373,7 +374,7 @@ export function BtpRankView() {
       align: 'right',
       render: btp => (
         <Tooltip label="Inspect Cedole & Cashflow Simulation" withArrow>
-          <ActionIcon color="blue" variant="light" onClick={() => setSelectedBtp(btp)}>
+          <ActionIcon aria-label="Inspect coupon and cashflow simulation" color="blue" variant="light" onClick={() => setSelectedBtp(btp)}>
             <IconEye size={16} />
           </ActionIcon>
         </Tooltip>

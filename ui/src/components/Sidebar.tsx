@@ -104,6 +104,7 @@ function NotificationBadge({ count, offsetBg = '#ffffff' }: { count: number; off
 
 export interface SidebarProps {
   collapsed: boolean;
+  mobile?: boolean;
   onToggleCollapse: () => void;
   activeTab: string;
   onNavigate: (tab: string) => void;
@@ -171,6 +172,7 @@ export function formatUserName(user: AuthUser | null) {
 
 export function Sidebar({
   collapsed,
+  mobile = false,
   onToggleCollapse,
   activeTab,
   onNavigate,
@@ -381,11 +383,12 @@ export function Sidebar({
             onClick={(e) => handleLinkClick(e, '/overview', onNavigate)}
             style={{ cursor: 'pointer', display: 'flex', justifyContent: 'center' }}
             title="Squirrel Overview"
+            aria-label="Squirrel overview"
           >
             {squirrelIcon}
           </Box>
           <Tooltip label="Expand sidebar (⌘B)" position="right" withArrow offset={14}>
-            <ActionIcon variant="subtle" color="gray" size="md" radius="md" onClick={onToggleCollapse}>
+            <ActionIcon variant="subtle" color="gray" size="md" radius="md" onClick={onToggleCollapse} aria-label="Expand sidebar">
               <IconLayoutSidebarLeftExpand size={18} />
             </ActionIcon>
           </Tooltip>
@@ -404,7 +407,7 @@ export function Sidebar({
           {renderDiagnosticsPopover(
             <Tooltip label={diagnosticsCount > 0 ? `${diagnosticsCount} Warnings` : 'Alerts'} position="right" withArrow offset={14}>
               <Box style={{ position: 'relative', display: 'inline-flex' }}>
-                <ActionIcon variant="subtle" color={diagnosticsCount > 0 ? 'orange' : 'gray'} size="md" radius="md">
+                <ActionIcon variant="subtle" color={diagnosticsCount > 0 ? 'orange' : 'gray'} size="md" radius="md" aria-label="Diagnostics and alerts">
                   {diagnosticsCount > 0 ? <IconBellRinging size={17} stroke={1.8} /> : <IconBell size={17} stroke={1.8} />}
                 </ActionIcon>
                 <NotificationBadge count={diagnosticsCount} offsetBg="light-dark(#f8fafc, #11141a)" />
@@ -444,7 +447,7 @@ export function Sidebar({
 
           {renderUserMenu(
             <Tooltip label={userName} position="right" withArrow offset={14}>
-              <UnstyledButton style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
+              <UnstyledButton aria-label={`Open ${userName} menu`} style={{ display: 'flex', justifyContent: 'center', marginTop: 4 }}>
                 {currentUser?.picture ? (
                   <Avatar src={currentUser.picture} size={32} radius="xl" />
                 ) : (
@@ -462,9 +465,9 @@ export function Sidebar({
 
   // Expanded Sidebar
   return (
-    <aside className="app-sidebar expanded">
+    <aside className={`app-sidebar expanded${mobile ? ' mobile' : ''}`}>
       {/* Top row: Brand logo and collapse button */}
-      <Group justify="space-between" align="center" mb="lg" px={4}>
+      {!mobile && <Group justify="space-between" align="center" mb="lg" px={4}>
         <Box
           component="a"
           href="/overview"
@@ -474,11 +477,11 @@ export function Sidebar({
           {squirrelBrandLogo}
         </Box>
         <Tooltip label="Collapse sidebar (⌘B)" position="bottom" withArrow>
-          <ActionIcon variant="subtle" color="gray" size="sm" radius="md" onClick={onToggleCollapse}>
+          <ActionIcon variant="subtle" color="gray" size="sm" radius="md" onClick={onToggleCollapse} aria-label="Collapse sidebar">
             <IconLayoutSidebarLeftCollapse size={18} />
           </ActionIcon>
         </Tooltip>
-      </Group>
+      </Group>}
 
       {/* Portfolio / Workspace card */}
       <Box mb="md" px={4}>
@@ -495,6 +498,7 @@ export function Sidebar({
                   size="md"
                   radius="md"
                   title="Diagnostics & Alerts"
+                  aria-label="Diagnostics and alerts"
                 >
                   {diagnosticsCount > 0 ? <IconBellRinging size={17} stroke={1.8} /> : <IconBell size={17} stroke={1.8} />}
                 </ActionIcon>
@@ -507,6 +511,7 @@ export function Sidebar({
               size="md"
               radius="md"
               title="Settings"
+              aria-label="Settings"
               onClick={() => onNavigate('settings')}
             >
               <IconSettings size={17} stroke={1.8} />
@@ -607,7 +612,7 @@ export function Sidebar({
         </button>
 
         {renderUserMenu(
-          <UnstyledButton className="sidebar-user-card">
+          <UnstyledButton className="sidebar-user-card" aria-label={`Open ${userName} menu`}>
             {currentUser?.picture ? (
               <Avatar src={currentUser.picture} size={30} radius="xl" />
             ) : (

@@ -1,26 +1,21 @@
 import { useState, useEffect } from 'react';
 import {
   ActionIcon,
-  Alert,
   Badge,
   Box,
   Button,
   Card,
-  Checkbox,
-  Collapse,
   Divider,
   Group,
   Modal,
   MultiSelect,
   NumberInput,
   Paper,
-  Progress,
   Select,
   SimpleGrid,
   Stack,
   Table,
   Text,
-  TextInput,
   Textarea,
   Tooltip,
 } from '@mantine/core';
@@ -29,13 +24,13 @@ import {
   IconAlertTriangle,
   IconBriefcase,
   IconCheck,
+  IconChartPie,
   IconChevronDown,
   IconChevronUp,
   IconFlask,
   IconGlobe,
   IconNotes,
   IconPencil,
-  IconRepeat,
   IconTrash,
   IconX,
 } from '@tabler/icons-react';
@@ -58,6 +53,7 @@ type Numeric = string | number;
 const n = (value: Numeric | undefined) => (value === '' || value === undefined ? 0 : Number(value));
 const minor = (value: Numeric | undefined) => Math.round(n(value) * 100);
 const bps = (value: Numeric | undefined) => Math.round(n(value) * 100);
+const strategyBps = (holding: Holding) => holding.planned_bps || holding.pac_bps || 0;
 
 type HoldingDraft = {
   accountID: string;
@@ -66,19 +62,15 @@ type HoldingDraft = {
   sinceBuy: Numeric;
   planned: Numeric;
   tax: Numeric;
-  isPAC: boolean;
-  pacBps: Numeric;
-  pacFrequency: string;
   notes: string;
 };
 
 function PacAmountEditor({ account, currency, onSaved }: { account: Account; currency: string; onSaved: () => Promise<void> }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState<number | string>('');
+  const [value, setValue] = useState<number | string>((account.pac_amount_minor ?? 0) / 100);
   const [saving, setSaving] = useState(false);
 
-  const start = () => { setValue((account.pac_amount_minor ?? 0) / 100); setEditing(true); };
-  const cancel = () => setEditing(false);
+  useEffect(() => setValue((account.pac_amount_minor ?? 0) / 100), [account.pac_amount_minor]);
+
   const save = async () => {
     setSaving(true);
     try {
@@ -86,144 +78,26 @@ function PacAmountEditor({ account, currency, onSaved }: { account: Account; cur
         method: 'PUT',
         body: JSON.stringify({ ...account, pac_amount_minor: Math.round(Number(value) * 100) }),
       });
-      notifications.show({ color: 'teal', title: 'PAC budget updated', message: `Monthly deposit set to ${money(Math.round(Number(value) * 100), currency)}/mo` });
-      setEditing(false);
+      notifications.show({ color: 'teal', title: 'Monthly contribution updated', message: `Monthly amount set to ${money(Math.round(Number(value) * 100), currency)}/mo` });
       await onSaved();
     } catch (cause) {
-      notifications.show({ color: 'red', title: 'Failed to update PAC budget', message: cause instanceof Error ? cause.message : String(cause) });
+      notifications.show({ color: 'red', title: 'Failed to update monthly contribution', message: cause instanceof Error ? cause.message : String(cause) });
     } finally {
       setSaving(false);
     }
   };
-  const onKey = (e: React.KeyboardEvent) => { if (e.key === 'Enter') void save(); if (e.key === 'Escape') cancel(); };
-
-  if (!editing) {
-    return (
-      <Group gap={4} align="center" wrap="nowrap">
-        <Badge color="teal" variant="light" size="sm" style={{ height: 'auto', padding: '2px 6px' }}>
-          <Text fw={750} size="xs" c="teal">
-            {money(account.pac_amount_minor ?? 0, currency)}/mo
-          </Text>
-        </Badge>
-        <Tooltip label="Edit monthly deposit" position="top" withArrow>
-          <ActionIcon size={18} variant="subtle" color="teal" onClick={start}>
-            <IconPencil size={12} />
-          </ActionIcon>
-        </Tooltip>
-      </Group>
-    );
-  }
+  const onKey = (e: React.KeyboardEvent) => { if (e.key === 'Enter') void save(); };
 
   return (
-    <Group gap={4} wrap="nowrap" align="center">
-      <NumberInput size="xs" w={96} min={0} decimalScale={2} value={value} onChange={setValue} onKeyDown={onKey} autoFocus
+    <Group gap="xs" wrap="nowrap" align="center">
+      <NumberInput aria-label={`Monthly PAC for ${account.name}`} size="xs" w={150} min={0} decimalScale={2} value={value} onChange={setValue} onKeyDown={onKey}
         leftSection={<Text size="xs" c="dimmed">{currency}</Text>} leftSectionWidth={30} />
-      <ActionIcon size={22} variant="filled" color="teal" loading={saving} onClick={() => void save()}>
-        <IconCheck size={12} />
-      </ActionIcon>
-      <ActionIcon size={22} variant="subtle" color="gray" onClick={cancel}>
-        <IconX size={12} />
-      </ActionIcon>
+      <Button size="compact-xs" loading={saving} disabled={Math.round(Number(value) * 100) === (account.pac_amount_minor ?? 0)} onClick={() => void save()}>Save amount</Button>
     </Group>
   );
 }
 
-function PacBpsEditor({ holding, accountMap, onSaved }: { holding: Holding; accountMap: Map<number, Account>; onSaved: () => Promise<void> }) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState<number | string>('');
-  const [saving, setSaving] = useState(false);
-
-  const account = accountMap.get(holding.account_id);
-  const totalPacMinor = account?.pac_amount_minor ?? 0;
-  const pacBps = holding.pac_bps ?? 0;
-  const calcAmountMinor = totalPacMinor > 0 && pacBps > 0 ? Math.round((totalPacMinor * pacBps) / 10000) : 0;
-  const freq = holding.pac_frequency || 'monthly';
-
-  const start = () => { setValue((holding.pac_bps ?? 0) / 100); setEditing(true); };
-  const cancel = () => setEditing(false);
-  const save = async () => {
-    setSaving(true);
-    try {
-      await api(`/api/holdings/${holding.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ ...holding, pac_bps: Math.round(Number(value) * 100) }),
-      });
-      notifications.show({ color: 'teal', title: 'PAC updated', message: `${holding.instrument_name} → ${Number(value).toFixed(2)}%` });
-      setEditing(false);
-      await onSaved();
-    } catch (cause) {
-      notifications.show({ color: 'red', title: 'Failed to update PAC', message: cause instanceof Error ? cause.message : String(cause) });
-    } finally {
-      setSaving(false);
-    }
-  };
-  const onKey = (e: React.KeyboardEvent) => { if (e.key === 'Enter') void save(); if (e.key === 'Escape') cancel(); };
-
-  if (!editing) {
-    if (!holding.is_pac && (holding.pac_bps ?? 0) === 0) {
-      return (
-        <Group gap={4} wrap="nowrap" align="center" justify="end">
-          <Text size="xs" c="dimmed">—</Text>
-          <Tooltip label="Set PAC %" position="top" withArrow>
-            <ActionIcon size={18} variant="subtle" color="gray" onClick={start}>
-              <IconPencil size={11} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      );
-    }
-
-    return (
-      <Stack gap={2} align="flex-end" style={{ minWidth: 84 }}>
-        <Badge color="teal" variant="filled" size="xs" style={{ flexShrink: 0, textTransform: 'none' }}>
-          <Group gap={3} align="center" wrap="nowrap">
-            <IconRepeat size={10} style={{ flexShrink: 0 }} />
-            <Text span size="xs" fw={700} style={{ whiteSpace: 'nowrap' }}>{percent(holding.pac_bps ?? 0)}</Text>
-          </Group>
-        </Badge>
-        <Group gap={3} align="center" justify="end" wrap="nowrap">
-          {calcAmountMinor > 0 && (
-            <Text size="xs" fw={700} c="teal" style={{ whiteSpace: 'nowrap' }}>
-              {money(calcAmountMinor, holding.currency ?? 'EUR')}/{freq.slice(0, 2)}
-            </Text>
-          )}
-          <Tooltip label="Edit PAC %" position="top" withArrow>
-            <ActionIcon size={16} variant="subtle" color="teal" onClick={start} style={{ flexShrink: 0 }}>
-              <IconPencil size={11} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-      </Stack>
-    );
-  }
-
-  return (
-    <Group gap={4} wrap="nowrap" align="center" justify="end">
-      <NumberInput
-        size="xs"
-        w={72}
-        min={0}
-        max={100}
-        decimalScale={2}
-        value={value}
-        onChange={setValue}
-        onKeyDown={onKey}
-        autoFocus
-        rightSection={<Text size="xs" c="dimmed" pr={4}>%</Text>}
-        rightSectionWidth={20}
-        styles={{ input: { paddingRight: 20 } }}
-      />
-      <ActionIcon size={22} variant="filled" color="teal" loading={saving} onClick={() => void save()}>
-        <IconCheck size={12} />
-      </ActionIcon>
-      <ActionIcon size={22} variant="subtle" color="gray" onClick={cancel}>
-        <IconX size={12} />
-      </ActionIcon>
-    </Group>
-  );
-}
-
-function InlinePacShareEditor({
+function InlinePlannedBpsEditor({
   holding,
   onSaved,
 }: {
@@ -234,11 +108,11 @@ function InlinePacShareEditor({
   const [value, setValue] = useState<number | string>('');
   const [saving, setSaving] = useState(false);
 
-  const pacBps = holding.pac_bps ?? 0;
+  const plannedBps = strategyBps(holding);
 
   const start = (e?: React.MouseEvent) => {
     e?.stopPropagation();
-    setValue(pacBps / 100);
+    setValue(plannedBps / 100);
     setEditing(true);
   };
   const cancel = (e?: React.MouseEvent) => {
@@ -252,19 +126,19 @@ function InlinePacShareEditor({
       const newBps = Math.round(Number(value) * 100);
       await api(`/api/holdings/${holding.id}`, {
         method: 'PUT',
-        body: JSON.stringify({ ...holding, pac_bps: newBps, is_pac: newBps > 0 }),
+        body: JSON.stringify({ ...holding, planned_bps: newBps, pac_bps: newBps, is_pac: newBps > 0 }),
       });
       notifications.show({
         color: 'teal',
-        title: 'PAC share updated',
-        message: `${holding.instrument_name} PAC allocation set to ${Number(value).toFixed(2)}%`,
+        title: 'Planned allocation updated',
+        message: `${holding.instrument_name} target set to ${Number(value).toFixed(2)}%`,
       });
       setEditing(false);
       await onSaved();
     } catch (cause) {
       notifications.show({
         color: 'red',
-        title: 'Failed to update PAC share',
+        title: 'Failed to update planned allocation',
         message: cause instanceof Error ? cause.message : String(cause),
       });
     } finally {
@@ -281,10 +155,10 @@ function InlinePacShareEditor({
     return (
       <Group gap={4} wrap="nowrap" align="center" justify="end" style={{ cursor: 'pointer' }} onClick={start}>
         <Badge color="teal" size="sm" variant="light" style={{ cursor: 'pointer' }}>
-          {percent(pacBps)}
+          {percent(plannedBps)}
         </Badge>
-        <Tooltip label="Edit PAC % inline" position="top" withArrow>
-          <ActionIcon size={18} variant="subtle" color="gray" onClick={start}>
+        <Tooltip label="Edit planned allocation" position="top" withArrow>
+          <ActionIcon aria-label="Edit planned allocation" size={18} variant="subtle" color="gray" onClick={start}>
             <IconPencil size={11} />
           </ActionIcon>
         </Tooltip>
@@ -295,6 +169,7 @@ function InlinePacShareEditor({
   return (
     <Group gap={4} wrap="nowrap" align="center" justify="end" onClick={e => e.stopPropagation()}>
       <NumberInput
+        aria-label="Planned allocation"
         size="xs"
         w={72}
         min={0}
@@ -308,10 +183,10 @@ function InlinePacShareEditor({
         rightSectionWidth={20}
         styles={{ input: { paddingRight: 20 } }}
       />
-      <ActionIcon size={22} variant="filled" color="teal" loading={saving} onClick={save}>
+      <ActionIcon aria-label="Save planned allocation" size={22} variant="filled" color="teal" loading={saving} onClick={save}>
         <IconCheck size={12} />
       </ActionIcon>
-      <ActionIcon size={22} variant="subtle" color="gray" onClick={cancel}>
+      <ActionIcon aria-label="Cancel planned allocation edit" size={22} variant="subtle" color="gray" onClick={cancel}>
         <IconX size={12} />
       </ActionIcon>
     </Group>
@@ -386,7 +261,7 @@ function InlineCurrencyEditor({
           <Text fw={650}>{money(holding.value_minor, currency)}</Text>
         )}
         <Tooltip label={`Edit ${label.toLowerCase()}`} position="top" withArrow>
-          <ActionIcon size={18} variant="subtle" color="gray" onClick={start}>
+          <ActionIcon aria-label={`Edit ${label.toLowerCase()}`} size={18} variant="subtle" color="gray" onClick={start}>
             <IconPencil size={11} />
           </ActionIcon>
         </Tooltip>
@@ -397,6 +272,7 @@ function InlineCurrencyEditor({
   return (
     <Group gap={4} wrap="nowrap" align="center" justify="end" onClick={e => e.stopPropagation()}>
       <NumberInput
+        aria-label={label}
         size="xs"
         w={104}
         min={0}
@@ -408,116 +284,10 @@ function InlineCurrencyEditor({
         leftSection={<Text size="xs" c="dimmed">{currency}</Text>}
         leftSectionWidth={30}
       />
-      <ActionIcon size={22} variant="filled" color="teal" loading={saving} onClick={save}>
+      <ActionIcon aria-label={`Save ${label.toLowerCase()}`} size={22} variant="filled" color="teal" loading={saving} onClick={save}>
         <IconCheck size={12} />
       </ActionIcon>
-      <ActionIcon size={22} variant="subtle" color="gray" onClick={cancel}>
-        <IconX size={12} />
-      </ActionIcon>
-    </Group>
-  );
-}
-
-function InlinePlannedBpsEditor({
-  holding,
-  actualBps,
-  onSaved,
-}: {
-  holding: Holding;
-  actualBps: number;
-  onSaved: () => Promise<void>;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState<number | string>('');
-  const [saving, setSaving] = useState(false);
-
-  const plannedBps = holding.planned_bps ?? 0;
-
-  const start = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    setValue(plannedBps / 100);
-    setEditing(true);
-  };
-  const cancel = (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setEditing(false);
-  };
-  const save = async (e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    setSaving(true);
-    try {
-      const newBps = Math.round(Number(value) * 100);
-      await api(`/api/holdings/${holding.id}`, {
-        method: 'PUT',
-        body: JSON.stringify({ ...holding, planned_bps: newBps }),
-      });
-      notifications.show({
-        color: 'teal',
-        title: 'Target allocation updated',
-        message: `${holding.instrument_name} wanted allocation set to ${Number(value).toFixed(2)}%`,
-      });
-      setEditing(false);
-      await onSaved();
-    } catch (cause) {
-      notifications.show({
-        color: 'red',
-        title: 'Failed to update target allocation',
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const onKey = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') void save();
-    if (e.key === 'Escape') cancel();
-  };
-
-  const deviationBps = actualBps - plannedBps;
-
-  if (!editing) {
-    return (
-      <Stack gap={1} align="flex-end" style={{ cursor: 'pointer' }} onClick={start}>
-        <Group gap={4} wrap="nowrap" align="center">
-          <Text fw={650} c={plannedBps > 0 ? undefined : 'dimmed'}>
-            {percent(plannedBps)}
-          </Text>
-          <Tooltip label="Edit wanted / target %" position="top" withArrow>
-            <ActionIcon size={18} variant="subtle" color="gray" onClick={start}>
-              <IconPencil size={11} />
-            </ActionIcon>
-          </Tooltip>
-        </Group>
-        {plannedBps > 0 && Math.abs(deviationBps) > 50 && (
-          <Text size="xs" c={deviationBps > 0 ? 'orange' : 'blue'}>
-            {deviationBps > 0 ? `+${percent(deviationBps)} over` : `${percent(deviationBps)} under`}
-          </Text>
-        )}
-      </Stack>
-    );
-  }
-
-  return (
-    <Group gap={4} wrap="nowrap" align="center" justify="end" onClick={e => e.stopPropagation()}>
-      <NumberInput
-        size="xs"
-        w={72}
-        min={0}
-        max={100}
-        decimalScale={2}
-        value={value}
-        onChange={setValue}
-        onKeyDown={onKey}
-        autoFocus
-        rightSection={<Text size="xs" c="dimmed" pr={4}>%</Text>}
-        rightSectionWidth={20}
-        styles={{ input: { paddingRight: 20 } }}
-      />
-      <ActionIcon size={22} variant="filled" color="teal" loading={saving} onClick={save}>
-        <IconCheck size={12} />
-      </ActionIcon>
-      <ActionIcon size={22} variant="subtle" color="gray" onClick={cancel}>
+      <ActionIcon aria-label={`Cancel ${label.toLowerCase()} edit`} size={22} variant="subtle" color="gray" onClick={cancel}>
         <IconX size={12} />
       </ActionIcon>
     </Group>
@@ -618,21 +388,7 @@ export function InvestmentsView({
     },
     { key: 'type', label: 'Type', sortable: true, render: holding => <Chip>{instrumentLabels[holding.instrument_type ?? 'other']}</Chip> },
     { key: 'asset_class', label: 'Asset class', sortable: true, render: holding => <Chip>{label(holding.asset_class || 'other')}</Chip> },
-    {
-      key: 'planned',
-      label: 'Wanted %',
-      sortable: true,
-      align: 'right',
-      render: holding => <InlinePlannedBpsEditor holding={holding} actualBps={actualBPS(holding)} onSaved={reload} />,
-    },
     { key: 'actual', label: 'Actual %', sortable: true, align: 'right', render: holding => <Text fw={650}>{percent(actualBPS(holding))}</Text> },
-    {
-      key: 'pac',
-      label: 'PAC %',
-      sortable: true,
-      align: 'right',
-      render: holding => <PacBpsEditor holding={holding} accountMap={accountMap} onSaved={reload} />,
-    },
     {
       key: 'value',
       label: 'Current value',
@@ -663,59 +419,47 @@ export function InvestmentsView({
     { key: 'actions', align: 'right', render: holding => <TableActions><TableAction label={`Edit ${holding.instrument_name}`} onClick={() => open(holding)}><IconPencil size={14} /></TableAction><TableAction label={`Delete ${holding.instrument_name}`} color="red" onClick={() => void remove(holding)}><IconTrash size={14} /></TableAction></TableActions> },
   ];
 
-  // Compute PAC accumulation metrics & TER drag for visible holdings & visible accounts
   const visibleAccounts = activeAccounts.filter(account => accountIDs.length === 0 || accountIDs.includes(String(account.id)));
-  const activePacHoldings = visibleHoldings
-    .filter(h => h.is_pac && (h.pac_bps ?? 0) > 0)
-    .sort((a, b) => (b.pac_bps ?? 0) - (a.pac_bps ?? 0));
+  const plannedHoldings = visibleHoldings
+    .filter(h => strategyBps(h) > 0)
+    .sort((a, b) => strategyBps(b) - strategyBps(a));
 
-  const totalMonthlyPacMinor = visibleAccounts.reduce((acc, a) => acc + (a.pac_amount_minor ?? 0), 0);
+  const totalMonthlyContributionMinor = visibleAccounts.reduce((sum, account) => sum + (account.pac_amount_minor ?? 0), 0);
   const currency = visibleHoldings[0]?.currency ?? visibleAccounts[0]?.currency ?? 'EUR';
 
-  let totalPacWeightedTERNum = 0;
-  let totalPacMonthlyInvestedMinor = 0;
-  let totalPacAnnualFeeDragMinor = 0;
+  let totalPlannedBps = 0;
+  let totalPlannedTERNum = 0;
+  let totalMonthlyAllocatedMinor = 0;
+  let totalAnnualFeeDragMinor = 0;
 
-  const pacItems = activePacHoldings.map(h => {
+  const planItems = plannedHoldings.map(h => {
     const acc = accountMap.get(h.account_id);
     const inst = instMap.get(h.instrument_id);
-    const totalAccPac = acc?.pac_amount_minor ?? 0;
-    const itemMonthlyMinor = totalAccPac > 0 && h.pac_bps ? Math.round((totalAccPac * h.pac_bps) / 10000) : 0;
+    const plannedBps = strategyBps(h);
+    const itemMonthlyMinor = Math.round(((acc?.pac_amount_minor ?? 0) * plannedBps) / 10000);
     const itemYearlyMinor = itemMonthlyMinor * 12;
     const terBps = h.ter_bps ?? inst?.ter_bps ?? 0;
     const annualDragMinor = Math.round((itemYearlyMinor * terBps) / 10000);
 
-    totalPacMonthlyInvestedMinor += itemMonthlyMinor;
-    totalPacWeightedTERNum += itemMonthlyMinor * terBps;
-    totalPacAnnualFeeDragMinor += annualDragMinor;
+    totalPlannedBps += plannedBps;
+    totalPlannedTERNum += plannedBps * terBps;
+    totalMonthlyAllocatedMinor += itemMonthlyMinor;
+    totalAnnualFeeDragMinor += annualDragMinor;
 
     return {
       holding: h,
-      accountName: h.account_name,
       instrumentName: h.instrument_name,
       ticker: h.instrument_ticker,
-      isin: h.instrument_isin,
-      pacBps: h.pac_bps ?? 0,
+      plannedBps,
       itemMonthlyMinor,
-      itemYearlyMinor,
       terBps,
-      annualDragMinor,
     };
   });
 
-  const pacWeightedTERBps = totalPacMonthlyInvestedMinor > 0 ? totalPacWeightedTERNum / totalPacMonthlyInvestedMinor : 0;
-
-  // Visible accounts that have a PAC budget or active PAC holdings
-  const pacAccountsList = visibleAccounts.filter(a => (a.pac_amount_minor ?? 0) > 0 || activePacHoldings.some(h => h.account_id === a.id));
-
-  // Per-account PAC allocation totals
-  const pacByAccount = new Map<number, { name: string; allocatedBps: number }>();
-  pacItems.forEach(item => {
-    const cur = pacByAccount.get(item.holding.account_id);
-    pacByAccount.set(item.holding.account_id, {
-      name: item.accountName ?? 'Account',
-      allocatedBps: (cur?.allocatedBps ?? 0) + item.pacBps,
-    });
+  const plannedWeightedTERBps = totalPlannedBps > 0 ? totalPlannedTERNum / totalPlannedBps : 0;
+  const plannedByAccount = new Map<number, number>();
+  planItems.forEach(item => {
+    plannedByAccount.set(item.holding.account_id, (plannedByAccount.get(item.holding.account_id) ?? 0) + item.plannedBps);
   });
 
   return (
@@ -732,9 +476,9 @@ export function InvestmentsView({
           },
           {
             value: 'pac',
-            label: 'PAC Plan',
-            icon: <IconRepeat size={16} />,
-            badge: activePacHoldings.length > 0 ? activePacHoldings.length : undefined,
+            label: 'Allocation Strategy',
+            icon: <IconChartPie size={16} />,
+            badge: plannedHoldings.length > 0 ? plannedHoldings.length : undefined,
             badgeColor: 'teal',
           },
           {
@@ -770,8 +514,8 @@ export function InvestmentsView({
       ) : currentSubtab === 'pac' ? (
         <Stack gap="md">
           <SectionHeader
-            title="Capital Accumulation Plan (PAC)"
-            subtitle="Automated dollar-cost averaging strategy and recurring monthly ETF allocations."
+            title="Investment Allocation Strategy"
+            subtitle="Set how each account is split across investments, with an optional monthly contribution for PAC/DCA investing."
             actions={
               <Group gap="sm" align="center" wrap="wrap">
                 {activeAccounts.length > 0 && (
@@ -792,46 +536,47 @@ export function InvestmentsView({
 
           <SimpleGrid cols={{ base: 1, sm: 2, lg: 4 }} spacing="md">
             <Card className="metric" p="md" radius="lg">
-              <Text size="xs" c="dimmed">Monthly Deposit</Text>
-              <Text size="xl" fw={800} c="teal" mt={4}>{money(totalMonthlyPacMinor, currency)}/mo</Text>
-              <Text size="xs" c="dimmed" mt={4}>Across {pacAccountsList.length} {pacAccountsList.length === 1 ? 'account' : 'accounts'}</Text>
+              <Text size="xs" c="dimmed">Monthly Contribution</Text>
+              <Text size="xl" fw={800} c="teal" mt={4}>{money(totalMonthlyContributionMinor, currency)}/mo</Text>
+              <Text size="xs" c="dimmed" mt={4}>Optional · across {visibleAccounts.length} {visibleAccounts.length === 1 ? 'account' : 'accounts'}</Text>
             </Card>
             <Card className="metric" p="md" radius="lg">
-              <Text size="xs" c="dimmed">Annual DCA Capital</Text>
-              <Text size="xl" fw={800} mt={4}>{money(totalMonthlyPacMinor * 12, currency)}/yr</Text>
-              <Text size="xs" c="dimmed" mt={4}>12 scheduled deposits</Text>
+              <Text size="xs" c="dimmed">Annual Contributions</Text>
+              <Text size="xl" fw={800} mt={4}>{totalMonthlyContributionMinor > 0 ? `${money(totalMonthlyContributionMinor * 12, currency)}/yr` : '—'}</Text>
+              <Text size="xs" c="dimmed" mt={4}>{totalMonthlyContributionMinor > 0 ? '12 monthly contributions' : 'No recurring amount set'}</Text>
             </Card>
             <Card className="metric" p="md" radius="lg">
-              <Text size="xs" c="dimmed">Weighted PAC TER</Text>
-              <Text size="xl" fw={800} mt={4}>{percent(pacWeightedTERBps)}</Text>
-              <Text size="xs" c="orange" mt={4}>Fee drag: -{money(totalPacAnnualFeeDragMinor, currency)}/yr</Text>
+              <Text size="xs" c="dimmed">Plan-Weighted TER</Text>
+              <Text size="xl" fw={800} mt={4}>{totalPlannedBps > 0 ? percent(plannedWeightedTERBps) : '—'}</Text>
+              <Text size="xs" c={totalMonthlyAllocatedMinor > 0 ? 'orange' : 'dimmed'} mt={4}>{totalMonthlyAllocatedMinor > 0 ? `Fee drag: -${money(totalAnnualFeeDragMinor, currency)}/yr` : totalPlannedBps > 0 ? 'Based on planned allocations' : 'Set planned allocations below'}</Text>
             </Card>
             <Card className="metric" p="md" radius="lg">
-              <Text size="xs" c="dimmed">5-Yr Projected Capital</Text>
-              <Text size="xl" fw={800} mt={4}>{money(totalMonthlyPacMinor * 60, currency)}</Text>
-              {totalPacAnnualFeeDragMinor > 0 && (
-                <Text size="xs" c="orange" mt={4}>5yr drag: -{money(totalPacAnnualFeeDragMinor * 5, currency)}</Text>
+              <Text size="xs" c="dimmed">5-Yr Contributions</Text>
+              <Text size="xl" fw={800} mt={4}>{totalMonthlyContributionMinor > 0 ? money(totalMonthlyContributionMinor * 60, currency) : '—'}</Text>
+              {totalAnnualFeeDragMinor > 0 && (
+                <Text size="xs" c="orange" mt={4}>5yr drag: -{money(totalAnnualFeeDragMinor * 5, currency)}</Text>
               )}
+              {totalMonthlyContributionMinor === 0 && <Text size="xs" c="dimmed" mt={4}>Set a monthly amount below</Text>}
             </Card>
           </SimpleGrid>
 
-          {pacAccountsList.length === 0 ? (
+          {visibleAccounts.length === 0 ? (
             <Empty
-              title="No active accumulation plans"
-              text="Set an automated monthly contribution on your accounts and assign ETF allocations to get started."
+              title="No active accounts"
+              text="Add or restore an account to build an allocation strategy."
             />
           ) : (
-            <SimpleGrid cols={{ base: 1, md: Math.min(2, Math.max(1, pacAccountsList.length)) }} spacing="md">
-              {pacAccountsList.map(acc => {
-                const allocatedBps = pacByAccount.get(acc.id)?.allocatedBps ?? 0;
+            <Stack gap="md">
+              {visibleAccounts.map(acc => {
+                const allocatedBps = plannedByAccount.get(acc.id) ?? 0;
                 const pct = Math.min(allocatedBps / 100, 100);
                 const over = allocatedBps > 10000;
                 const full = allocatedBps === 10000;
-                const accountPacHoldings = pacItems.filter(item => item.holding.account_id === acc.id);
+                const accountPlannedHoldings = planItems.filter(item => item.holding.account_id === acc.id);
                 const allocatedMonthlyMinor = Math.round(((acc.pac_amount_minor ?? 0) * allocatedBps) / 10000);
 
                 return (
-                  <Card key={acc.id} className="data-table-card metric" p="lg" radius="lg" withBorder>
+                  <Card key={acc.id} className="metric" p="lg" radius="lg" withBorder>
                     <Group justify="space-between" align="start" mb="xs">
                       <Box>
                         <Group gap="xs" align="center">
@@ -839,23 +584,23 @@ export function InvestmentsView({
                           <Badge size="xs" variant="light" color="gray">{acc.type}</Badge>
                           <Badge size="xs" variant="outline" color="teal">{acc.currency ?? currency}</Badge>
                         </Group>
-                        <Text size="xs" c="dimmed" mt={2}>
-                          Account PAC Budget: <Text span fw={700} c="teal">{money(acc.pac_amount_minor ?? 0, acc.currency ?? currency)}/mo</Text>
-                        </Text>
                       </Box>
-                      <Group gap="xs" align="center">
-                        <PacAmountEditor account={acc} currency={acc.currency ?? currency} onSaved={reload} />
-                        {full && <Badge color="teal" variant="light" leftSection={<IconCheck size={12} />}>100% Allocated</Badge>}
-                        {over && <Badge color="red" variant="light" leftSection={<IconAlertTriangle size={12} />}>Over-allocated ({((allocatedBps / 100)).toFixed(1)}%)</Badge>}
-                        {!full && !over && <Badge color="orange" variant="light">{((10000 - allocatedBps) / 100).toFixed(1)}% Unallocated</Badge>}
-                      </Group>
+                      <Stack gap={2} align="flex-end">
+                        <Text size="xs" c="dimmed">Monthly contribution (optional)</Text>
+                        <Group gap="xs" align="center" wrap="wrap" justify="flex-end">
+                          <PacAmountEditor account={acc} currency={acc.currency ?? currency} onSaved={reload} />
+                          {full && <Badge color="teal" variant="light" leftSection={<IconCheck size={12} />}>100% Allocated</Badge>}
+                          {over && <Badge color="red" variant="light" leftSection={<IconAlertTriangle size={12} />}>Over-allocated ({((allocatedBps / 100)).toFixed(1)}%)</Badge>}
+                          {!full && !over && <Badge color="orange" variant="light">{((10000 - allocatedBps) / 100).toFixed(1)}% Unallocated</Badge>}
+                        </Group>
+                      </Stack>
                     </Group>
 
                     <Box my="xs">
                       <Group justify="space-between" align="baseline" mb={4}>
-                        <Text size="xs" c="dimmed">DCA Allocation</Text>
+                        <Text size="xs" c="dimmed">Strategy Allocation</Text>
                         <Text size="xs" fw={700} c={over ? 'red' : full ? 'teal' : 'dimmed'}>
-                          {money(allocatedMonthlyMinor, acc.currency ?? currency)} / {money(acc.pac_amount_minor ?? 0, acc.currency ?? currency)} ({((allocatedBps / 100)).toFixed(2)}%)
+                          {(acc.pac_amount_minor ?? 0) > 0 ? `${money(allocatedMonthlyMinor, acc.currency ?? currency)} / ${money(acc.pac_amount_minor ?? 0, acc.currency ?? currency)} · ` : ''}{((allocatedBps / 100)).toFixed(2)}% assigned
                         </Text>
                       </Group>
                       <Box h={8} bg="light-dark(var(--mantine-color-gray-2), var(--mantine-color-dark-5))" style={{ display: 'flex', overflow: 'hidden', borderRadius: 999 }}>
@@ -868,7 +613,7 @@ export function InvestmentsView({
 
                     <Divider my="sm" opacity={0.5} />
 
-                    {accountPacHoldings.length === 0 ? (
+                    {accountPlannedHoldings.length === 0 ? (
                       <Text size="xs" c="dimmed" py="sm" ta="center">
                         No ETF allocations assigned to this account yet. Click "Add Investment" to configure.
                       </Text>
@@ -877,14 +622,16 @@ export function InvestmentsView({
                         <Table verticalSpacing="xs" horizontalSpacing="xs" highlightOnHover className="data-table">
                           <Table.Thead>
                             <Table.Tr>
-                              <Table.Th style={{ width: '46%' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Instrument</Text></Table.Th>
-                              <Table.Th style={{ width: '20%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">PAC Share</Text></Table.Th>
-                              <Table.Th style={{ width: '17%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Monthly</Text></Table.Th>
-                              <Table.Th style={{ width: '17%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Holding Value</Text></Table.Th>
+                              <Table.Th style={{ width: '37%' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Instrument</Text></Table.Th>
+                              <Table.Th style={{ width: '12%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">TER</Text></Table.Th>
+                              <Table.Th style={{ width: '17%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Planned Allocation</Text></Table.Th>
+                              <Table.Th style={{ width: '15%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Monthly Amount</Text></Table.Th>
+                              <Table.Th style={{ width: '14%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Holding Value</Text></Table.Th>
+                              <Table.Th style={{ width: '5%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Actions</Text></Table.Th>
                             </Table.Tr>
                           </Table.Thead>
                           <Table.Tbody>
-                            {accountPacHoldings.map(item => (
+                            {accountPlannedHoldings.map(item => (
                               <Table.Tr key={item.holding.id}>
                                 <Table.Td>
                                   <Group gap={6} wrap="nowrap">
@@ -895,17 +642,25 @@ export function InvestmentsView({
                                   </Group>
                                 </Table.Td>
                                 <Table.Td style={{ textAlign: 'right' }}>
-                                  <InlinePacShareEditor holding={item.holding} onSaved={reload} />
+                                  <Text size="xs" c={item.terBps > 0 ? undefined : 'dimmed'}>{item.terBps > 0 ? percent(item.terBps) : '—'}</Text>
                                 </Table.Td>
                                 <Table.Td style={{ textAlign: 'right' }}>
-                                  <Text size="xs" fw={700} c="teal">
-                                    {money(item.itemMonthlyMinor, acc.currency ?? currency)}/mo
+                                  <InlinePlannedBpsEditor holding={item.holding} onSaved={reload} />
+                                </Table.Td>
+                                <Table.Td style={{ textAlign: 'right' }}>
+                                  <Text size="xs" fw={700} c={item.itemMonthlyMinor > 0 ? 'teal' : 'dimmed'}>
+                                    {item.itemMonthlyMinor > 0 ? `${money(item.itemMonthlyMinor, acc.currency ?? currency)}/mo` : '—'}
                                   </Text>
                                 </Table.Td>
                                 <Table.Td style={{ textAlign: 'right' }}>
                                   <Text size="xs" fw={600}>
                                     {money(item.holding.value_minor, item.holding.currency ?? currency)}
                                   </Text>
+                                </Table.Td>
+                                <Table.Td style={{ textAlign: 'right' }}>
+                                  <TableActions>
+                                    <TableAction label={`Delete ${item.instrumentName}`} color="red" onClick={() => void remove(item.holding)}><IconTrash size={14} /></TableAction>
+                                  </TableActions>
                                 </Table.Td>
                               </Table.Tr>
                             ))}
@@ -916,14 +671,14 @@ export function InvestmentsView({
                   </Card>
                 );
               })}
-            </SimpleGrid>
+            </Stack>
           )}
         </Stack>
       ) : (
         <>
           <SectionHeader
             title="Investments"
-            subtitle="Actual allocation uses current investment values within each currency; planned allocation is your target."
+            subtitle="Your actual holdings, values, performance, and current portfolio allocation."
             actions={
               <Group gap="sm" align="center" wrap="wrap">
                 {activeAccounts.length > 0 && (
@@ -995,55 +750,36 @@ export function InvestmentsView({
               rows={displayedHoldings}
               columns={columns}
               rowKey={holding => holding.id}
-              minWidth={1250}
+              minWidth={1050}
               sort={table.sort}
               direction={table.direction}
               onSort={(key, direction) => void table.sortRows(key, direction)}
-              rowClassName={holding => ((holding.pac_bps ?? 0) > 0 ? 'pac-active-row' : undefined)}
-              rowStyle={holding => {
-                const isPacActive = (holding.pac_bps ?? 0) > 0;
-                return {
-                  opacity: isPacActive ? 1 : 0.75,
-                  backgroundColor: isPacActive ? 'rgba(121, 80, 242, 0.08)' : undefined,
-                  borderLeft: isPacActive ? '3px solid #7950f2' : undefined,
-                };
-              }}
             />
           )}
         </>
       )}
 
-      <HoldingModal key={editing?.id ?? 'new'} opened={opened} close={() => setOpened(false)} holding={editing} accounts={activeAccounts} holdings={holdings} instruments={instruments} taxRates={taxRates} saved={async () => { setOpened(false); await reload(); }} />
+      <HoldingModal key={editing?.id ?? 'new'} opened={opened} close={() => setOpened(false)} holding={editing} accounts={activeAccounts} instruments={instruments} taxRates={taxRates} saved={async () => { setOpened(false); await reload(); }} />
       {confirmDeleteModal}
     </ViewShell>
   );
 }
 
-function HoldingModal({ opened, close, holding, accounts, holdings, instruments, taxRates, saved }: { opened: boolean; close: () => void; holding?: Holding; accounts: Account[]; holdings: Holding[]; instruments: Instrument[]; taxRates: TaxRate[]; saved: () => Promise<void> }) {
-  const [form, setForm] = useState<HoldingDraft>(() => holding ? { accountID: String(holding.account_id), instrumentID: String(holding.instrument_id), value: holding.value_minor / 100, sinceBuy: holding.invested_minor ? (holding.value_minor - holding.invested_minor) / 100 : '', planned: holding.planned_bps / 100, tax: holding.tax_bps / 100, isPAC: Boolean(holding.is_pac), pacBps: holding.pac_bps ? holding.pac_bps / 100 : '', pacFrequency: holding.pac_frequency || 'monthly', notes: holding.notes ?? '' } : { accountID: String(accounts.find(item => item.preferred)?.id ?? accounts[0]?.id ?? ''), instrumentID: String(instruments[0]?.id ?? ''), value: 0, sinceBuy: '', planned: 0, tax: (taxRates[0]?.rate_bps ?? 2600) / 100, isPAC: true, pacBps: '', pacFrequency: 'monthly', notes: '' });
+function HoldingModal({ opened, close, holding, accounts, instruments, taxRates, saved }: { opened: boolean; close: () => void; holding?: Holding; accounts: Account[]; instruments: Instrument[]; taxRates: TaxRate[]; saved: () => Promise<void> }) {
+  const [form, setForm] = useState<HoldingDraft>(() => holding ? { accountID: String(holding.account_id), instrumentID: String(holding.instrument_id), value: holding.value_minor / 100, sinceBuy: holding.invested_minor ? (holding.value_minor - holding.invested_minor) / 100 : '', planned: holding.planned_bps / 100, tax: holding.tax_bps / 100, notes: holding.notes ?? '' } : { accountID: String(accounts.find(item => item.preferred)?.id ?? accounts[0]?.id ?? ''), instrumentID: String(instruments[0]?.id ?? ''), value: 0, sinceBuy: '', planned: 0, tax: (taxRates[0]?.rate_bps ?? 2600) / 100, notes: '' });
   const [saving, setSaving] = useState(false);
-
-  const selectedAccount = accounts.find(a => String(a.id) === form.accountID);
-  const otherHoldingsPacBps = holdings
-    .filter(h => String(h.account_id) === form.accountID && h.id !== holding?.id)
-    .reduce((sum, h) => sum + (h.pac_bps ?? 0), 0);
-
-  const currentEnteredPacBps = bps(form.pacBps);
-  const totalAccountPacBps = otherHoldingsPacBps + currentEnteredPacBps;
 
   const save = async () => {
     setSaving(true);
     try {
       const value = minor(form.value);
-      const pacBpsVal = bps(form.pacBps);
       const plannedBpsVal = bps(form.planned);
-      const isPacActive = form.isPAC || pacBpsVal > 0;
 
       const invested = value === 0 ? 0 : (form.sinceBuy === '' ? value : value - minor(form.sinceBuy));
       if (invested < 0) throw new Error('Since-buy gain/loss cannot be greater than the current value');
 
-      if (value === 0 && pacBpsVal === 0 && plannedBpsVal === 0) {
-        throw new Error('Investments with €0 value require a positive PAC allocation percentage (e.g. 5%) or target weight');
+      if (value === 0 && plannedBpsVal === 0) {
+        throw new Error('Investments with €0 value require a positive planned allocation');
       }
 
       const body = {
@@ -1053,9 +789,9 @@ function HoldingModal({ opened, close, holding, accounts, holdings, instruments,
         value_minor: value,
         planned_bps: plannedBpsVal,
         tax_bps: bps(form.tax),
-        is_pac: isPacActive,
-        pac_bps: pacBpsVal,
-        pac_frequency: form.pacFrequency || 'monthly',
+        is_pac: plannedBpsVal > 0,
+        pac_bps: plannedBpsVal,
+        pac_frequency: holding?.pac_frequency || 'monthly',
         notes: form.notes,
       };
       await api(holding ? `/api/holdings/${holding.id}` : '/api/holdings', { method: holding ? 'PUT' : 'POST', body: JSON.stringify(body) });
@@ -1069,5 +805,5 @@ function HoldingModal({ opened, close, holding, accounts, holdings, instruments,
     }
   };
 
-  return <Modal opened={opened} onClose={close} title={holding ? 'Edit investment' : 'Add investment'}><Stack><Select searchable required label="Account" value={form.accountID} data={accounts.map(item => ({ value: String(item.id), label: `${item.name} · ${item.type}${item.preferred ? ' · default' : ''} · ${item.currency}` }))} onChange={value => setForm({ ...form, accountID: value ?? '' })} /><Select searchable required label="Instrument" nothingFoundMessage="No ticker, name, or ISIN match" value={form.instrumentID} data={instruments.map(item => ({ value: String(item.id), label: [item.ticker, item.name, instrumentLabels[item.instrument_type], item.isin].filter(Boolean).join(' · ') }))} onChange={value => setForm({ ...form, instrumentID: value ?? '' })} /><SimpleGrid cols={2}><NumberInput label="Current value" min={0} decimalScale={2} value={form.value} onChange={value => setForm({ ...form, value })} /><NumberInput label="Planned allocation (%)" min={0} max={100} decimalScale={2} value={form.planned} onChange={value => setForm({ ...form, planned: value })} /><NumberInput label="Since buy gain / loss (optional)" placeholder="Example: -0.85" decimalScale={2} value={form.sinceBuy} onChange={value => setForm({ ...form, sinceBuy: value })} /><NumberInput label="Applicable tax (%)" min={0} max={100} decimalScale={2} value={form.tax} onChange={value => setForm({ ...form, tax: value })} /></SimpleGrid><Textarea label="Notes & Context for AI Assistant" placeholder="e.g. Core global equity allocation for long-term 20yr wealth accumulation..." rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.currentTarget.value })} /><Group mt="xs" align="center" justify="space-between"><Checkbox label="Active Accumulation Plan (PAC / Dollar-cost averaging)" checked={form.isPAC || bps(form.pacBps) > 0} onChange={e => setForm({ ...form, isPAC: e.currentTarget.checked })} /></Group>{(form.isPAC || bps(form.pacBps) > 0) && <Stack gap="xs" mt="xs"><SimpleGrid cols={2}><NumberInput label="PAC Share of Account (%)" placeholder="e.g. 64" min={0} max={100} decimalScale={2} value={form.pacBps} onChange={value => setForm({ ...form, pacBps: value, isPAC: true })} /><Select label="PAC Frequency" value={form.pacFrequency} data={[{ value: 'monthly', label: 'Monthly' }, { value: 'biweekly', label: 'Biweekly' }, { value: 'weekly', label: 'Weekly' }, { value: 'quarterly', label: 'Quarterly' }]} onChange={val => setForm({ ...form, pacFrequency: val ?? 'monthly' })} /></SimpleGrid><Text size="xs" c={totalAccountPacBps > 10000 ? 'red' : 'dimmed'}>Total PAC allocated for {selectedAccount?.name || 'Account'}: <Text span fw={700}>{percent(totalAccountPacBps)}</Text> / 100.00% (Account Total: {money(selectedAccount?.pac_amount_minor ?? 0, selectedAccount?.currency ?? 'EUR')}/mo)</Text></Stack>}<Text size="xs" c="dimmed">Investments with €0 value are fully supported for new PAC accumulation plans prior to your first purchase.</Text><Select label="Tax preset" data={taxRates.map(item => ({ value: String(item.rate_bps), label: `${item.label} (${percent(item.rate_bps)})` }))} onChange={value => value && setForm({ ...form, tax: Number(value) / 100 })} /><Group justify="end"><Button loading={saving} onClick={() => void save()}>Save investment</Button></Group></Stack></Modal>;
+  return <Modal opened={opened} onClose={close} title={holding ? 'Edit investment' : 'Add investment'}><Stack><Select searchable required label="Account" value={form.accountID} data={accounts.map(item => ({ value: String(item.id), label: `${item.name} · ${item.type}${item.preferred ? ' · default' : ''} · ${item.currency}` }))} onChange={value => setForm({ ...form, accountID: value ?? '' })} /><Select searchable required label="Instrument" nothingFoundMessage="No ticker, name, or ISIN match" value={form.instrumentID} data={instruments.map(item => ({ value: String(item.id), label: [item.ticker, item.name, instrumentLabels[item.instrument_type], item.isin].filter(Boolean).join(' · ') }))} onChange={value => setForm({ ...form, instrumentID: value ?? '' })} /><SimpleGrid cols={2}><NumberInput label="Current value" min={0} decimalScale={2} value={form.value} onChange={value => setForm({ ...form, value })} /><NumberInput label="Planned allocation (%)" min={0} max={100} decimalScale={2} value={form.planned} onChange={value => setForm({ ...form, planned: value })} /><NumberInput label="Since buy gain / loss (optional)" placeholder="Example: -0.85" decimalScale={2} value={form.sinceBuy} onChange={value => setForm({ ...form, sinceBuy: value })} /><NumberInput label="Applicable tax (%)" min={0} max={100} decimalScale={2} value={form.tax} onChange={value => setForm({ ...form, tax: value })} /></SimpleGrid><Textarea label="Notes & Context for AI Assistant" placeholder="e.g. Core global equity allocation for long-term wealth accumulation..." rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.currentTarget.value })} /><Text size="xs" c="dimmed">A planned allocation lets you add an investment before the first purchase.</Text><Select label="Tax preset" data={taxRates.map(item => ({ value: String(item.rate_bps), label: `${item.label} (${percent(item.rate_bps)})` }))} onChange={value => value && setForm({ ...form, tax: Number(value) / 100 })} /><Group justify="end"><Button loading={saving} onClick={() => void save()}>Save investment</Button></Group></Stack></Modal>;
 }

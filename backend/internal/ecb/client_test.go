@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -61,8 +62,8 @@ func TestCollectors(t *testing.T) {
 }
 
 func TestLiveFetchMarketContext(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping live market fetch in short mode")
+	if os.Getenv("SQUIRREL_INTEGRATION") != "1" {
+		t.Skip("set SQUIRREL_INTEGRATION=1 to run live market fetches")
 	}
 	client := New()
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)

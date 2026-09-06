@@ -27,7 +27,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
           {language || 'code'}
         </Badge>
         <Tooltip label={copied ? 'Copied!' : 'Copy Code'}>
-          <ActionIcon size="xs" variant="subtle" color={copied ? 'teal' : 'gray'} onClick={copyToClipboard}>
+          <ActionIcon aria-label={copied ? 'Code copied' : 'Copy code'} size="xs" variant="subtle" color={copied ? 'teal' : 'gray'} onClick={copyToClipboard}>
             {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
           </ActionIcon>
         </Tooltip>

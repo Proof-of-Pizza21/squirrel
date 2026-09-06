@@ -47,6 +47,8 @@ The default database is `data/squirrel.db` inside the project. The entire `data/
 just test
 ```
 
+The default suite is offline and deterministic. Run the optional live ECB and web-search probes with `SQUIRREL_INTEGRATION=1 CGO_ENABLED=0 go test ./backend/internal/ecb ./backend/internal/mcp`.
+
 ## Backups and AI safety
 
 Settings exports a versioned, user-scoped JSON backup containing accounts, holdings, snapshots, profile preferences, chat history, and starred BTPs. The file is not encrypted; configuration, API keys, and the shared instrument catalog are excluded. Restore validates the backup and replaces that user's data in one SQLite transaction.

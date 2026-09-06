@@ -84,7 +84,7 @@ export function AccountsView({ accounts, rates, taxRates, reload }: { accounts: 
     },
     {
       key: 'pac',
-      label: 'PAC Deposit',
+      label: 'Monthly Contribution',
       sortable: true,
       align: 'right',
       render: account => (
@@ -163,14 +163,14 @@ function AccountModal({ opened, close, account, rates, taxRates, saved }: { open
       <Select label="Account type" value={form.type} data={[{ value: 'bank', label: 'Bank' }, { value: 'broker', label: 'Broker' }, { value: 'other', label: 'Other' }]} onChange={value => setForm({ ...form, type: (value ?? 'other') as Account['type'] })} />
       <TextInput required maxLength={3} label="Currency" value={form.currency} onChange={e => setForm({ ...form, currency: e.currentTarget.value })} />
       <NumberInput label="Current cash balance" min={0} decimalScale={2} value={form.balance} onChange={value => setForm({ ...form, balance: value })} />
-      <NumberInput label="Total Monthly PAC Amount" placeholder="e.g. 300" min={0} decimalScale={2} value={form.pacAmount} onChange={value => setForm({ ...form, pacAmount: value })} />
+      <NumberInput label="Monthly contribution (optional)" placeholder="e.g. 300" min={0} decimalScale={2} value={form.pacAmount} onChange={value => setForm({ ...form, pacAmount: value })} />
       <Select label="Tax preset" placeholder="Choose a configured rate" data={taxRates.map(item => ({ value: String(item.rate_bps), label: `${item.label} (${percent(item.rate_bps)})` }))} onChange={value => value && setForm({ ...form, tax: Number(value) / 100 })} />
       <NumberInput label="Tax on interest (%)" min={0} max={100} decimalScale={2} value={form.tax} onChange={value => setForm({ ...form, tax: value })} />
       <NumberInput label="Annual account fee" min={0} decimalScale={2} value={form.fee} onChange={value => setForm({ ...form, fee: value })} />
       <Checkbox label="Preferred account for new holdings" checked={form.preferred} disabled={form.archived} onChange={event => setForm({ ...form, preferred: event.currentTarget.checked })} />
       <Checkbox label="Archived account" checked={form.archived} onChange={event => setForm({ ...form, archived: event.currentTarget.checked, preferred: event.currentTarget.checked ? false : form.preferred })} />
     </SimpleGrid>
-    <Textarea label="Notes & Context for AI Assistant" placeholder="e.g. Main broker account for monthly ETF PAC accumulation and long-term holding..." rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.currentTarget.value })} />
+    <Textarea label="Notes & Context for AI Assistant" placeholder="e.g. Main broker account for long-term ETF investing..." rows={2} value={form.notes} onChange={e => setForm({ ...form, notes: e.currentTarget.value })} />
     <Divider label="Interest tiers" />
       {form.tiers.map((item, index) => <Card key={index} withBorder padding="sm"><Grid align="end">
         <Grid.Col span={{ base: 12, sm: 3 }}><NumberInput label="Up to" placeholder="No limit" min={0} value={item.upTo} onChange={value => tier(index, { upTo: value })} /></Grid.Col>

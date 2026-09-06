@@ -429,6 +429,7 @@ export function DraftPortfoliosModal({
                   <ActionIcon
                     color="red"
                     variant="subtle"
+                    aria-label="Remove allocation"
                     onClick={() =>
                       setEditingDraft(curr =>
                         curr

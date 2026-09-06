@@ -30,7 +30,6 @@ import {
   IconSun,
   IconMoon,
   IconPalette,
-  IconRepeat,
   IconRadar2,
 } from '@tabler/icons-react';
 import type { Account, Instrument, BtpBond } from '../api';
@@ -190,10 +189,10 @@ export function QuickSearchModal({
       {
         id: 'nav-pac',
         category: 'Navigation',
-        title: 'PAC Accumulation Plans',
-        subtitle: 'Monthly DCA plans, broker allocation targets, and progress',
-        icon: <IconRepeat size={18} color="var(--mantine-color-teal-6)" />,
-        keywords: ['pac', 'dca', 'accumulation', 'monthly', 'recurring', 'savings plan'],
+        title: 'Investment Allocation Strategy',
+        subtitle: 'Account allocation targets with optional monthly contributions',
+        icon: <IconChartPie size={18} color="var(--mantine-color-teal-6)" />,
+        keywords: ['allocation', 'strategy', 'pac', 'dca', 'monthly', 'recurring', 'savings plan'],
         href: '/investments/pac',
         onSelect: () => {
           onSwitchTab('investments');

@@ -16,7 +16,7 @@ build: ui
 	mkdir -p bin
 	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w -X main.version={{version}}" -o bin/squirrel ./backend/cmd/squirrel
 
-test: ui
+test:
 	CGO_ENABLED=0 go test ./backend/...
 	cd ui && npm run check
 	cd ui && npm test

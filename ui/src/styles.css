@@ -94,7 +94,37 @@ body {
 
 @media (max-width: 768px) {
   .app-content-container {
-    padding: 18px 14px 44px;
+    padding: 64px 14px 44px;
+  }
+
+  .mobile-nav-trigger {
+    position: fixed;
+    top: 14px;
+    left: 14px;
+    z-index: 300;
+    padding: 8px;
+    border: 1px solid var(--mantine-color-default-border);
+    border-radius: 8px;
+    background: var(--mantine-color-body);
+    box-shadow: var(--mantine-shadow-sm);
+  }
+
+  .mobile-nav-drawer .mantine-Drawer-header {
+    min-height: 58px;
+    padding: 12px;
+  }
+
+  .mobile-nav-drawer .mantine-Drawer-body {
+    padding: 0;
+  }
+
+  .app-sidebar.mobile {
+    position: static;
+    width: 100%;
+    height: calc(100dvh - 58px);
+    padding: 0 12px 16px;
+    border-right: 0;
+    box-shadow: none;
   }
 }
 
@@ -636,7 +666,8 @@ body,
   min-width: max-content;
 }
 
-.mantine-Table-tr:hover .table-actions {
+.mantine-Table-tr:hover .table-actions,
+.mantine-Table-tr:focus-within .table-actions {
   opacity: 1;
 }
 
@@ -738,3 +769,13 @@ body,
   -webkit-backdrop-filter: blur(6px);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

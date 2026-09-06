@@ -2,9 +2,12 @@ package mcp_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -12,6 +15,12 @@ import (
 )
 
 type dummyHandler struct{}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
 
 func (d *dummyHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/v1.SummaryService/GetSummary" {
@@ -142,10 +151,31 @@ func TestMCPHandlerToolsCall(t *testing.T) {
 }
 
 func TestMCPWebSearchTool(t *testing.T) {
+	searchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/html/" {
+			http.NotFound(w, r)
+			return
+		}
+		_, _ = w.Write([]byte(`<a class="result__a" href="https://example.com/btp">Italian BTP yield</a><a class="result__snippet">Deterministic search result</a>`))
+	}))
+	t.Cleanup(searchServer.Close)
+
+	target, err := url.Parse(searchServer.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transport := searchServer.Client().Transport
+	previousTransport := http.DefaultTransport
+	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		clone := req.Clone(req.Context())
+		clone.URL.Scheme = target.Scheme
+		clone.URL.Host = target.Host
+		return transport.RoundTrip(clone)
+	})
+	t.Cleanup(func() { http.DefaultTransport = previousTransport })
+
 	handler := mcp.NewHandler(&dummyHandler{})
-	body := []byte(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"web_search","arguments":{"query":"test Search" font}}}`)
-	// sanitize json query
-	body = []byte(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"web_search","arguments":{"query":"Italian BTP yield"}}}`)
+	body := []byte(`{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"web_search","arguments":{"query":"Italian BTP yield"}}}`)
 	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 
@@ -168,5 +198,21 @@ func TestMCPWebSearchTool(t *testing.T) {
 	content, ok := result["content"].([]interface{})
 	if !ok || len(content) == 0 {
 		t.Fatalf("expected non-empty content in result: %v", result)
+	}
+	if !strings.Contains(rec.Body.String(), "https://example.com/btp") {
+		t.Fatalf("expected deterministic search result: %s", rec.Body.String())
+	}
+}
+
+func TestLiveMCPWebSearchTool(t *testing.T) {
+	if os.Getenv("SQUIRREL_INTEGRATION") != "1" {
+		t.Skip("set SQUIRREL_INTEGRATION=1 to run live web search")
+	}
+	result, err := mcp.PerformWebSearch(context.Background(), "Italian BTP yield")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(result, `"results_count"`) {
+		t.Fatalf("unexpected live search result: %s", result)
 	}
 }

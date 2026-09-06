@@ -248,6 +248,7 @@ export function UpdateSituationModal({ opened, onClose, accounts, holdings, relo
                                 size={20}
                                 variant="subtle"
                                 color={typeof retPct === 'number' && retPct < 0 ? 'red' : 'teal'}
+                                aria-label="Toggle gain or loss"
                                 onClick={() => {
                                   const cur = holdingReturns[h.id];
                                   if (typeof cur === 'number' && cur !== 0) {

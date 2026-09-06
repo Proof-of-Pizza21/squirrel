@@ -1030,10 +1030,10 @@ export function AIConsultantView({
                                 else if (e.key === 'Escape') setEditingTitleId(null);
                               }}
                             />
-                            <ActionIcon size="xs" color="teal" onClick={() => void saveEditedTitle(s.id)}>
+                            <ActionIcon aria-label="Save chat title" size="xs" color="teal" onClick={() => void saveEditedTitle(s.id)}>
                               <IconCheck size={14} />
                             </ActionIcon>
-                            <ActionIcon size="xs" color="gray" onClick={() => setEditingTitleId(null)}>
+                            <ActionIcon aria-label="Cancel chat title edit" size="xs" color="gray" onClick={() => setEditingTitleId(null)}>
                               <IconX size={14} />
                             </ActionIcon>
                           </Group>
@@ -1050,9 +1050,10 @@ export function AIConsultantView({
                           {!isEditing && (
                             <Tooltip label="Rename">
                               <ActionIcon
-                                size="xs"
-                                variant="subtle"
-                                color="gray"
+                              size="xs"
+                              variant="subtle"
+                              color="gray"
+                              aria-label="Rename chat"
                                 onClick={() => {
                                   setEditingTitleId(s.id);
                                   setEditTitleValue(s.title);
@@ -1067,6 +1068,7 @@ export function AIConsultantView({
                               size="xs"
                               variant="subtle"
                               color="red"
+                              aria-label="Delete chat"
                               onClick={e => void removeSession(s.id, e)}
                             >
                               <IconTrash size={14} />

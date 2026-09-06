@@ -35,11 +35,13 @@ import {
   Avatar,
   Badge,
   Box,
+  Burger,
   Button,
   Card,
   Checkbox,
   Collapse,
   Divider,
+  Drawer,
   Grid,
   Group,
   Loader,
@@ -64,6 +66,7 @@ import {
   UnstyledButton,
   useMantineColorScheme,
 } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { notifications } from '@mantine/notifications';
 import { api, instrumentClient, type Account, type Diagnostic, type Instrument, type InstrumentAlternative, type InstrumentType, type Holding, type RankedInstrument, type ReferenceRate, type Snapshot, type Summary, type TaxRate } from './api';
 import { Chip, chipColor } from './Chip';
@@ -168,6 +171,8 @@ export function SquirrelIcon({ size = 26, className }: { size?: number; classNam
       fill="none"
       xmlns="http://www.w3.org/2000/svg"
       className={className}
+      aria-hidden="true"
+      focusable="false"
       style={{ display: 'inline-block', verticalAlign: 'middle', flexShrink: 0 }}
     >
       <defs>
@@ -305,6 +310,8 @@ export default function App() {
 
   const [updateModalOpened, setUpdateModalOpened] = useState(false);
   const [quickSearchOpened, setQuickSearchOpened] = useState(false);
+  const [mobileNavOpened, setMobileNavOpened] = useState(false);
+  const isMobile = useMediaQuery('(max-width: 48em)');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     return localStorage.getItem('squirrel.sidebarCollapsed') === 'true';
   });
@@ -486,7 +493,8 @@ export default function App() {
         });
       } else if (isCmdOrCtrl && e.key.toLowerCase() === 'b') {
         e.preventDefault();
-        handleToggleSidebar();
+        if (isMobile) setMobileNavOpened(opened => !opened);
+        else handleToggleSidebar();
       } else if (!isEditable && (e.key === '/' || (isCmdOrCtrl && e.key.toLowerCase() === 'k'))) {
         e.preventDefault();
         setQuickSearchOpened(true);
@@ -495,7 +503,7 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [profile.hide_balances]);
+  }, [profile.hide_balances, isMobile]);
 
   if (needsLogin) return <LoginView />;
   if (!data) {
@@ -510,30 +518,57 @@ export default function App() {
   const sortedSnapshots = [...(data.snapshots ?? [])].sort((a, b) => a.observed_on.localeCompare(b.observed_on));
   const latestSnapshotDate = sortedSnapshots[sortedSnapshots.length - 1]?.observed_on;
 
+  const navigation = (
+    <Sidebar
+      collapsed={!isMobile && sidebarCollapsed}
+      mobile={isMobile}
+      onToggleCollapse={handleToggleSidebar}
+      activeTab={activeTab}
+      onNavigate={tab => { handleSidebarNavigate(tab); setMobileNavOpened(false); }}
+      diagnosticsCount={diagnosticsCount}
+      diagnostics={data.summary.diagnostics ?? []}
+      accountsCount={data.accounts.length}
+      currentUser={currentUser}
+      hideBalances={hideBalances}
+      onToggleHideBalances={() => setHideBalances(v => !v)}
+      onOpenUpdate={() => { setMobileNavOpened(false); setUpdateModalOpened(true); }}
+      onOpenSearch={() => { setMobileNavOpened(false); setQuickSearchOpened(true); }}
+      onSignOut={() => { clearToken(); setNeedsLogin(true); setCurrentUser(null); setData(undefined); }}
+      scheme={scheme}
+      accent={accent}
+      onApplyTheme={applyTheme}
+      enableBtp={Boolean(profile.enable_btp_ranks)}
+      squirrelIcon={<SquirrelIcon size={26} />}
+      squirrelBrandLogo={<SquirrelBrandLogo size={24} />}
+      latestSnapshotDate={latestSnapshotDate}
+    />
+  );
+
   return (
     <div className="app-layout">
-      <Sidebar
-        collapsed={sidebarCollapsed}
-        onToggleCollapse={handleToggleSidebar}
-        activeTab={activeTab}
-        onNavigate={handleSidebarNavigate}
-        diagnosticsCount={diagnosticsCount}
-        diagnostics={data.summary.diagnostics ?? []}
-        accountsCount={data.accounts.length}
-        currentUser={currentUser}
-        hideBalances={hideBalances}
-        onToggleHideBalances={() => setHideBalances(v => !v)}
-        onOpenUpdate={() => setUpdateModalOpened(true)}
-        onOpenSearch={() => setQuickSearchOpened(true)}
-        onSignOut={() => { clearToken(); setNeedsLogin(true); setCurrentUser(null); setData(undefined); }}
-        scheme={scheme}
-        accent={accent}
-        onApplyTheme={applyTheme}
-        enableBtp={Boolean(profile.enable_btp_ranks)}
-        squirrelIcon={<SquirrelIcon size={26} />}
-        squirrelBrandLogo={<SquirrelBrandLogo size={24} />}
-        latestSnapshotDate={latestSnapshotDate}
-      />
+      {isMobile ? (
+        <>
+          {!mobileNavOpened && (
+            <Burger
+              className="mobile-nav-trigger"
+              opened={false}
+              onClick={() => setMobileNavOpened(true)}
+              aria-label="Open navigation"
+              size="sm"
+            />
+          )}
+          <Drawer
+            className="mobile-nav-drawer"
+            opened={mobileNavOpened}
+            onClose={() => setMobileNavOpened(false)}
+            title={<SquirrelBrandLogo size={22} />}
+            size={280}
+            padding={0}
+          >
+            {navigation}
+          </Drawer>
+        </>
+      ) : navigation}
 
       <div className="app-main-content">
         <main className="app-content-container">
