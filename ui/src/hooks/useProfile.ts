@@ -90,6 +90,53 @@ export async function loadProfile(): Promise<void> {
 
 let _saveTimer: ReturnType<typeof setTimeout> | undefined;
 
+async function persistProfile(): Promise<void> {
+  try {
+    await profileClient.updateProfile({
+      profile: {
+        theme: _profile.theme,
+        preferredCurrency: _profile.preferred_currency,
+        monthlyExpensesMinor: BigInt(Math.round(_profile.monthly_expenses_minor)),
+        reserveMonths: _profile.reserve_months,
+        hideBalances: _profile.hide_balances,
+        emergencyGoalMinor: BigInt(Math.round(_profile.emergency_goal_minor)),
+        fireExpensesMinor: BigInt(Math.round(_profile.fire_expenses_minor)),
+        instrumentColumnsJson: _profile.instrument_columns_json,
+        showFireCalculator: _profile.show_fire_calculator,
+        enableBtpRanks: _profile.enable_btp_ranks,
+        activeTab: _profile.active_tab,
+        aiSettingsJson: _profile.ai_settings_json,
+        draftPortfoliosJson: _profile.draft_portfolios_json,
+        userDescription: _profile.user_description,
+      },
+    });
+  } catch (cause) {
+    notifications.show({
+      color: 'red',
+      title: 'Profile was not saved',
+      message: cause instanceof Error ? cause.message : String(cause),
+    });
+  }
+}
+
+export async function flushProfile(): Promise<void> {
+  if (!_saveTimer) return;
+  clearTimeout(_saveTimer);
+  _saveTimer = undefined;
+  await persistProfile();
+}
+
+export function resetProfile(): void {
+  clearTimeout(_saveTimer);
+  _saveTimer = undefined;
+  _profile = { ...DEFAULTS };
+  _loaded = false;
+  localStorage.removeItem('squirrel.aiSettings');
+  localStorage.removeItem('squirrel.draftPortfolios');
+  setHideBalancesState(false);
+  notify();
+}
+
 export function updateProfile(patch: Partial<UserProfile>): void {
   _profile = { ..._profile, ...patch };
   if (patch.show_fire_calculator !== undefined) {
@@ -108,30 +155,8 @@ export function updateProfile(patch: Partial<UserProfile>): void {
   notify();
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => {
-    profileClient.updateProfile({
-      profile: {
-        theme: _profile.theme,
-        preferredCurrency: _profile.preferred_currency,
-        monthlyExpensesMinor: BigInt(Math.round(_profile.monthly_expenses_minor)),
-        reserveMonths: _profile.reserve_months,
-        hideBalances: _profile.hide_balances,
-        emergencyGoalMinor: BigInt(Math.round(_profile.emergency_goal_minor)),
-        fireExpensesMinor: BigInt(Math.round(_profile.fire_expenses_minor)),
-        instrumentColumnsJson: _profile.instrument_columns_json,
-        showFireCalculator: _profile.show_fire_calculator,
-        enableBtpRanks: _profile.enable_btp_ranks,
-        activeTab: _profile.active_tab,
-        aiSettingsJson: _profile.ai_settings_json,
-        draftPortfoliosJson: _profile.draft_portfolios_json,
-        userDescription: _profile.user_description,
-      },
-    }).catch((cause: unknown) => {
-      notifications.show({
-        color: 'red',
-        title: 'Profile was not saved',
-        message: cause instanceof Error ? cause.message : String(cause),
-      });
-    });
+    _saveTimer = undefined;
+    void persistProfile();
   }, 600);
 }
 

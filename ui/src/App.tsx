@@ -91,9 +91,9 @@ type Data = { summary: Summary; accounts: Account[]; rates: ReferenceRate[]; tax
 type Numeric = string | number;
 const normalizeTab = (tab: string | null) => tab === 'holdings' || tab === 'geo' ? 'investments' : tab === 'advisor' ? 'consultant' : tab === 'rates' ? 'market' : tab;
 import { money, investedMoney, setHideBalancesState } from './utils/format';
-import { captureTokenFromURL, clearToken, fetchMe, isUnauthenticatedError, type AuthUser } from './auth';
+import { activateSession, captureTokenFromURL, clearToken, fetchMe, isUnauthenticatedError, listSignedInUsers, rememberSession, removeSession, type AuthUser } from './auth';
 import { LoginView } from './LoginView';
-import { loadProfile, updateProfile, useProfile } from './hooks/useProfile';
+import { flushProfile, loadProfile, resetProfile, updateProfile, useProfile } from './hooks/useProfile';
 import { handleLinkClick } from './utils/navigation';
 import { Sidebar, type ThemeAccent, type ThemeScheme, ACCENT_HEX } from './components/Sidebar';
 
@@ -273,12 +273,13 @@ export function formatUserName(user?: AuthUser | null): string {
 export default function App() {
   const [needsLogin, setNeedsLogin] = useState(false);
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(null);
+  const [signedInUsers, setSignedInUsers] = useState<AuthUser[]>(listSignedInUsers);
   const [data, setData] = useState<Data>();
   const [error, setError] = useState('');
   const load = useCallback(async () => {
     captureTokenFromURL();
     try {
-      const [summary, accounts, rates, taxRates, instruments, holdings, snapshots] = await Promise.all([
+      const [summary, accounts, rates, taxRates, instruments, holdings, snapshots, user] = await Promise.all([
         api<Summary>('/api/summary'),
         api<Account[]>('/api/accounts'),
         api<ReferenceRate[]>('/api/reference-rates'),
@@ -286,12 +287,14 @@ export default function App() {
         api<Instrument[]>('/api/instruments'),
         api<Holding[]>('/api/holdings'),
         api<Snapshot[]>('/api/snapshots'),
+        fetchMe(),
+        loadProfile(),
       ]);
       setData({ summary, accounts: accounts ?? [], rates: rates ?? [], taxRates: taxRates ?? [], instruments: instruments ?? [], holdings: holdings ?? [], snapshots: snapshots ?? [] });
       setNeedsLogin(false);
       setError('');
-      fetchMe().then(u => setCurrentUser(u));
-      void loadProfile();
+      setCurrentUser(user);
+      if (user) setSignedInUsers(rememberSession(user));
     } catch (cause) {
       if (isUnauthenticatedError(cause)) {
         setNeedsLogin(true);
@@ -307,6 +310,35 @@ export default function App() {
     }
   }, []);
   useEffect(() => void load(), [load]);
+
+  const switchAccount = async (googleID: string) => {
+    if (googleID === currentUser?.google_id) return;
+    await flushProfile();
+    if (!activateSession(googleID)) return;
+    resetProfile();
+    setCurrentUser(null);
+    setData(undefined);
+    setMobileNavOpened(false);
+    await load();
+  };
+
+  const addAccount = async () => {
+    await flushProfile();
+    window.location.assign('/auth/login/google?select=1');
+  };
+
+  const signOut = async () => {
+    await flushProfile();
+    const remaining = currentUser ? removeSession(currentUser.google_id) : [];
+    if (!currentUser) clearToken();
+    resetProfile();
+    setSignedInUsers(remaining);
+    setCurrentUser(null);
+    setData(undefined);
+    setMobileNavOpened(false);
+    if (remaining.length > 0) await load();
+    else setNeedsLogin(true);
+  };
 
   const [updateModalOpened, setUpdateModalOpened] = useState(false);
   const [quickSearchOpened, setQuickSearchOpened] = useState(false);
@@ -529,11 +561,14 @@ export default function App() {
       diagnostics={data.summary.diagnostics ?? []}
       accountsCount={data.accounts.length}
       currentUser={currentUser}
+      signedInUsers={signedInUsers}
       hideBalances={hideBalances}
       onToggleHideBalances={() => setHideBalances(v => !v)}
       onOpenUpdate={() => { setMobileNavOpened(false); setUpdateModalOpened(true); }}
       onOpenSearch={() => { setMobileNavOpened(false); setQuickSearchOpened(true); }}
-      onSignOut={() => { clearToken(); setNeedsLogin(true); setCurrentUser(null); setData(undefined); }}
+      onAddAccount={() => void addAccount()}
+      onSwitchAccount={googleID => void switchAccount(googleID)}
+      onSignOut={() => void signOut()}
       scheme={scheme}
       accent={accent}
       onApplyTheme={applyTheme}

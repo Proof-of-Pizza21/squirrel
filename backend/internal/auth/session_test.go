@@ -1,8 +1,13 @@
 package auth
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+
+	"golang.org/x/oauth2"
 )
 
 func TestSessionRejectsWeakInputsAndAlteredHeaders(t *testing.T) {
@@ -20,5 +25,22 @@ func TestSessionRejectsWeakInputsAndAlteredHeaders(t *testing.T) {
 	}
 	if user, err := VerifySession("12345678901234567890123456789012", token); err != nil || user.GoogleID != "user" {
 		t.Fatalf("valid session failed: user=%+v err=%v", user, err)
+	}
+}
+
+func TestLoginCanRequestGoogleAccountChooser(t *testing.T) {
+	handler := &Handler{oauth: &oauth2.Config{
+		ClientID: "client",
+		Endpoint: oauth2.Endpoint{AuthURL: "https://accounts.example/auth"},
+	}}
+	recorder := httptest.NewRecorder()
+	handler.Login(recorder, httptest.NewRequest(http.MethodGet, "/auth/login/google?select=1", nil))
+
+	location, err := url.Parse(recorder.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recorder.Code != http.StatusFound || location.Query().Get("prompt") != "select_account" || location.Query().Get("state") == "" {
+		t.Fatalf("unexpected OAuth redirect: status=%d location=%s", recorder.Code, location)
 	}
 }

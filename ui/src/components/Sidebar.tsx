@@ -43,6 +43,7 @@ import {
   IconSettings,
   IconSun,
   IconUser,
+  IconUserPlus,
 } from '@tabler/icons-react';
 import type { AuthUser } from '../auth';
 import type { Diagnostic } from '../api';
@@ -112,10 +113,13 @@ export interface SidebarProps {
   diagnostics: Diagnostic[];
   accountsCount: number;
   currentUser: AuthUser | null;
+  signedInUsers: AuthUser[];
   hideBalances: boolean;
   onToggleHideBalances: () => void;
   onOpenUpdate: () => void;
   onOpenSearch: () => void;
+  onAddAccount: () => void;
+  onSwitchAccount: (googleID: string) => void;
   onSignOut: () => void;
   scheme: ThemeScheme;
   accent: ThemeAccent;
@@ -180,10 +184,13 @@ export function Sidebar({
   diagnostics,
   accountsCount,
   currentUser,
+  signedInUsers,
   hideBalances,
   onToggleHideBalances,
   onOpenUpdate,
   onOpenSearch,
+  onAddAccount,
+  onSwitchAccount,
   onSignOut,
   scheme,
   accent,
@@ -302,6 +309,31 @@ export function Sidebar({
           </>
         )}
 
+        {signedInUsers.length > 1 && (
+          <>
+            <Box px="xs" pt={4}>
+              <Text size="10px" fw={700} c="dimmed" tt="uppercase">Signed-in users</Text>
+            </Box>
+            {signedInUsers.map(user => (
+              <Menu.Item
+                key={user.google_id}
+                leftSection={<Avatar src={user.picture} size={22} radius="xl"><IconUser size={12} /></Avatar>}
+                rightSection={user.google_id === currentUser?.google_id ? <IconCheck size={14} /> : null}
+                onClick={() => user.google_id !== currentUser?.google_id && onSwitchAccount(user.google_id)}
+              >
+                <Text size="xs" truncate>{user.email}</Text>
+              </Menu.Item>
+            ))}
+            <Menu.Divider />
+          </>
+        )}
+
+        {currentUser && (
+          <Menu.Item leftSection={<IconUserPlus size={15} />} onClick={onAddAccount}>
+            Add another account
+          </Menu.Item>
+        )}
+
         <Menu.Item
           leftSection={hideBalances ? <IconEyeOff size={15} /> : <IconEye size={15} />}
           onClick={onToggleHideBalances}
@@ -364,7 +396,7 @@ export function Sidebar({
           <>
             <Menu.Divider />
             <Menu.Item color="red" leftSection={<IconLogout size={15} />} onClick={onSignOut}>
-              Sign out
+              Sign out current account
             </Menu.Item>
           </>
         )}

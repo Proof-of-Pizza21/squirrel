@@ -50,7 +50,11 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteLaxMode,
 		MaxAge:   600,
 	})
-	http.Redirect(w, r, h.oauth.AuthCodeURL(state), http.StatusFound)
+	var options []oauth2.AuthCodeOption
+	if r.URL.Query().Get("select") == "1" {
+		options = append(options, oauth2.SetAuthURLParam("prompt", "select_account"))
+	}
+	http.Redirect(w, r, h.oauth.AuthCodeURL(state, options...), http.StatusFound)
 }
 
 // Callback handles the Google redirect, creates a session, and sends the token to the SPA.
