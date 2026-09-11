@@ -331,6 +331,7 @@ export function InvestmentsView({
   const [accountIDs, setAccountIDs] = useQueryParamArray('accounts');
   const [selectedAssetClass, setSelectedAssetClass] = useState<string | null>(null);
   const { confirmDelete, modal: confirmDeleteModal } = useConfirmDelete();
+  const [driftThresholdBps, setDriftThresholdBps] = useState(1000);
   const table = useBackendRows('/api/holdings', holdings, 'value', 'desc');
   const activeAccounts = accounts.filter(account => !account.archived); const activeAccountIDs = new Set(activeAccounts.map(account => account.id));
   const accountMap = new Map<number, Account>(accounts.map(a => [a.id, a]));
@@ -339,6 +340,17 @@ export function InvestmentsView({
     confirmDelete('investment', `${holding.instrument_name} · ${holding.account_name}`, async () => {
       try { await api(`/api/holdings/${holding.id}`, { method: 'DELETE' }); await reload(); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     });
+  };
+  const zeroPac = async (holding: Holding) => {
+    try {
+      await api(`/api/holdings/${holding.id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ ...holding, planned_bps: 0, pac_bps: 0, is_pac: false }),
+      });
+      await reload();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
   };
   const ready = activeAccounts.length > 0 && instruments.length > 0;
   const activeHoldings = table.rows.filter(holding => activeAccountIDs.has(holding.account_id));
@@ -529,6 +541,19 @@ export function InvestmentsView({
                     onChange={setAccountIDs}
                   />
                 )}
+                <Group gap={4} align="center" wrap="nowrap">
+                  <Text size="xs" c="dimmed" style={{ whiteSpace: 'nowrap' }}>Drift alert at</Text>
+                  <NumberInput
+                    w={76}
+                    size="xs"
+                    suffix="%"
+                    min={1}
+                    max={30}
+                    decimalScale={1}
+                    value={driftThresholdBps / 100}
+                    onChange={v => setDriftThresholdBps(Math.round(Number(v || 5) * 100))}
+                  />
+                </Group>
                 <Button disabled={!ready} onClick={() => open()}>Add Investment</Button>
               </Group>
             }
@@ -575,6 +600,80 @@ export function InvestmentsView({
                 const accountPlannedHoldings = planItems.filter(item => item.holding.account_id === acc.id);
                 const allocatedMonthlyMinor = Math.round(((acc.pac_amount_minor ?? 0) * allocatedBps) / 10000);
 
+                // Drift computation
+                const accountTotalValue = activeHoldings.filter(h => h.account_id === acc.id).reduce((sum, h) => sum + h.value_minor, 0);
+                const driftMap = new Map(accountPlannedHoldings.map(item => {
+                  const actualAccBps = accountTotalValue > 0
+                    ? Math.round(item.holding.value_minor * 10000 / accountTotalValue)
+                    : 0;
+                  return [item.holding.id, { actualAccBps, driftBps: actualAccBps - item.plannedBps }];
+                }));
+                const maxAbsDrift = accountPlannedHoldings.length > 0
+                  ? Math.max(...accountPlannedHoldings.map(item => Math.abs(driftMap.get(item.holding.id)!.driftBps)))
+                  : 0;
+                const hasDrift = maxAbsDrift >= driftThresholdBps;
+
+                // Suggested PAC (5% step granularity):
+                // 1. Overweight (drift >= +threshold) → 0 PAC
+                // 2. Remaining: weight = planned + excess underweight deficit, normalized to totalPlanBps
+                // 3. Round each to nearest 5% (500 bps); fix sum; keep planned if no 5%-step change
+                const suggestedPacMap = new Map<number, number>();
+                if (hasDrift) {
+                  const STEP = 500;
+                  const totalPlanBps = accountPlannedHoldings.reduce((sum, item) => sum + item.plannedBps, 0);
+                  const overweightIds = new Set(
+                    accountPlannedHoldings
+                      .filter(item => (driftMap.get(item.holding.id)?.driftBps ?? 0) >= driftThresholdBps)
+                      .map(item => item.holding.id),
+                  );
+                  const nonOverweight = accountPlannedHoldings.filter(item => !overweightIds.has(item.holding.id));
+                  const totalWeight = nonOverweight.reduce((sum, item) => {
+                    const d = driftMap.get(item.holding.id)?.driftBps ?? 0;
+                    return sum + item.plannedBps + Math.max(0, -d - driftThresholdBps);
+                  }, 0);
+
+                  // Continuous values before rounding
+                  const continuous = new Map<number, number>();
+                  accountPlannedHoldings.forEach(item => {
+                    if (overweightIds.has(item.holding.id)) {
+                      continuous.set(item.holding.id, 0);
+                    } else {
+                      const d = driftMap.get(item.holding.id)?.driftBps ?? 0;
+                      const w = item.plannedBps + Math.max(0, -d - driftThresholdBps);
+                      continuous.set(item.holding.id, totalWeight > 0 ? w / totalWeight * totalPlanBps : item.plannedBps);
+                    }
+                  });
+
+                  // Round each to nearest STEP
+                  const rounded = new Map<number, number>();
+                  accountPlannedHoldings.forEach(item => {
+                    rounded.set(item.holding.id, Math.round((continuous.get(item.holding.id) ?? 0) / STEP) * STEP);
+                  });
+
+                  // Fix rounding sum error: prefer most-underweight non-overweight positions when adding,
+                  // most-overweight when subtracting — avoids boosting already-high positions
+                  const roundedSum = [...rounded.values()].reduce((a, b) => a + b, 0);
+                  let diff = totalPlanBps - roundedSum;
+                  if (diff !== 0) {
+                    const adjustable = accountPlannedHoldings
+                      .filter(item => !overweightIds.has(item.holding.id))
+                      .map(item => ({ id: item.holding.id, drift: driftMap.get(item.holding.id)?.driftBps ?? 0 }))
+                      .sort((a, b) => diff > 0 ? a.drift - b.drift : b.drift - a.drift);
+                    for (const { id } of adjustable) {
+                      if (diff === 0) break;
+                      const adj = diff > 0 ? STEP : -STEP;
+                      rounded.set(id, (rounded.get(id) ?? 0) + adj);
+                      diff -= adj;
+                    }
+                  }
+
+                  // Only apply if the rounded value differs from planned by at least one STEP
+                  accountPlannedHoldings.forEach(item => {
+                    const r = rounded.get(item.holding.id) ?? item.plannedBps;
+                    suggestedPacMap.set(item.holding.id, Math.abs(r - item.plannedBps) >= STEP ? r : item.plannedBps);
+                  });
+                }
+
                 return (
                   <Card key={acc.id} className="metric" p="lg" radius="lg" withBorder>
                     <Group justify="space-between" align="start" mb="xs">
@@ -618,55 +717,141 @@ export function InvestmentsView({
                         No ETF allocations assigned to this account yet. Click "Add Investment" to configure.
                       </Text>
                     ) : (
-                      <Paper className="data-table-card" radius="md" withBorder style={{ padding: 0, marginTop: 8 }}>
-                        <Table verticalSpacing="xs" horizontalSpacing="xs" highlightOnHover className="data-table">
-                          <Table.Thead>
-                            <Table.Tr>
-                              <Table.Th style={{ width: '37%' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Instrument</Text></Table.Th>
-                              <Table.Th style={{ width: '12%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">TER</Text></Table.Th>
-                              <Table.Th style={{ width: '17%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Planned Allocation</Text></Table.Th>
-                              <Table.Th style={{ width: '15%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Monthly Amount</Text></Table.Th>
-                              <Table.Th style={{ width: '14%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Holding Value</Text></Table.Th>
-                              <Table.Th style={{ width: '5%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Actions</Text></Table.Th>
-                            </Table.Tr>
-                          </Table.Thead>
-                          <Table.Tbody>
-                            {accountPlannedHoldings.map(item => (
-                              <Table.Tr key={item.holding.id}>
-                                <Table.Td>
-                                  <Group gap={6} wrap="nowrap">
-                                    {item.ticker ? <TickerBadge ticker={item.ticker} /> : null}
-                                    <Text size="xs" fw={600} truncate style={{ flex: 1, minWidth: 0 }} title={item.instrumentName}>
-                                      {item.instrumentName}
-                                    </Text>
-                                  </Group>
-                                </Table.Td>
-                                <Table.Td style={{ textAlign: 'right' }}>
-                                  <Text size="xs" c={item.terBps > 0 ? undefined : 'dimmed'}>{item.terBps > 0 ? percent(item.terBps) : '—'}</Text>
-                                </Table.Td>
-                                <Table.Td style={{ textAlign: 'right' }}>
-                                  <InlinePlannedBpsEditor holding={item.holding} onSaved={reload} />
-                                </Table.Td>
-                                <Table.Td style={{ textAlign: 'right' }}>
-                                  <Text size="xs" fw={700} c={item.itemMonthlyMinor > 0 ? 'teal' : 'dimmed'}>
-                                    {item.itemMonthlyMinor > 0 ? `${money(item.itemMonthlyMinor, acc.currency ?? currency)}/mo` : '—'}
-                                  </Text>
-                                </Table.Td>
-                                <Table.Td style={{ textAlign: 'right' }}>
-                                  <Text size="xs" fw={600}>
-                                    {money(item.holding.value_minor, item.holding.currency ?? currency)}
-                                  </Text>
-                                </Table.Td>
-                                <Table.Td style={{ textAlign: 'right' }}>
-                                  <TableActions>
-                                    <TableAction label={`Delete ${item.instrumentName}`} color="red" onClick={() => void remove(item.holding)}><IconTrash size={14} /></TableAction>
-                                  </TableActions>
-                                </Table.Td>
+                      <>
+                        <Paper className="data-table-card" radius="md" withBorder style={{ padding: 0, marginTop: 8 }}>
+                          <Table verticalSpacing="xs" horizontalSpacing="xs" highlightOnHover className="data-table">
+                            <Table.Thead>
+                              <Table.Tr>
+                                <Table.Th style={{ width: hasDrift ? '22%' : '25%' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Instrument</Text></Table.Th>
+                                <Table.Th style={{ width: '7%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">TER</Text></Table.Th>
+                                <Table.Th style={{ width: '11%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Planned</Text></Table.Th>
+                                <Table.Th style={{ width: '11%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Actual / Drift</Text></Table.Th>
+                                <Table.Th style={{ width: '10%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Monthly</Text></Table.Th>
+                                {hasDrift && <Table.Th style={{ width: '10%', textAlign: 'right' }}><Text size="xs" fw={700} c="orange" tt="uppercase">Suggested PAC</Text></Table.Th>}
+                                <Table.Th style={{ width: '9%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Value</Text></Table.Th>
+                                <Table.Th style={{ width: '9%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Invested</Text></Table.Th>
+                                <Table.Th style={{ width: '3%', textAlign: 'right' }}></Table.Th>
                               </Table.Tr>
-                            ))}
-                          </Table.Tbody>
-                        </Table>
-                      </Paper>
+                            </Table.Thead>
+                            <Table.Tbody>
+                              {accountPlannedHoldings.map(item => {
+                                const drift = driftMap.get(item.holding.id)!;
+                                const suggestedBps = suggestedPacMap.get(item.holding.id) ?? item.plannedBps;
+                                const suggestedMonthlyMinor = Math.round(((acc.pac_amount_minor ?? 0) * suggestedBps) / 10000);
+                                const driftColor = drift.driftBps > 0 ? 'green' : drift.driftBps < 0 ? 'red' : 'dimmed';
+                                return (
+                                  <Table.Tr key={item.holding.id}>
+                                    <Table.Td>
+                                      <Group gap={6} wrap="nowrap">
+                                        {item.ticker ? <TickerBadge ticker={item.ticker} /> : null}
+                                        <Text size="xs" fw={600} truncate style={{ flex: 1, minWidth: 0 }} title={item.instrumentName}>
+                                          {item.instrumentName}
+                                        </Text>
+                                      </Group>
+                                    </Table.Td>
+                                    <Table.Td style={{ textAlign: 'right' }}>
+                                      <Text size="xs" c={item.terBps > 0 ? undefined : 'dimmed'}>{item.terBps > 0 ? percent(item.terBps) : '—'}</Text>
+                                    </Table.Td>
+                                    <Table.Td style={{ textAlign: 'right' }}>
+                                      <InlinePlannedBpsEditor holding={item.holding} onSaved={reload} />
+                                    </Table.Td>
+                                    <Table.Td style={{ textAlign: 'right' }}>
+                                      <Stack gap={1} align="flex-end">
+                                        <Text size="xs" fw={700} c={driftColor}>{(drift.actualAccBps / 100).toFixed(1)}%</Text>
+                                        <Text size="10px" fw={600} c={driftColor}>
+                                          {drift.driftBps > 0 ? '+' : ''}{(drift.driftBps / 100).toFixed(1)}%
+                                        </Text>
+                                      </Stack>
+                                    </Table.Td>
+                                    <Table.Td style={{ textAlign: 'right' }}>
+                                      <Text size="xs" fw={700} c={item.itemMonthlyMinor > 0 ? 'teal' : 'dimmed'}>
+                                        {item.itemMonthlyMinor > 0 ? `${money(item.itemMonthlyMinor, acc.currency ?? currency)}/mo` : '—'}
+                                      </Text>
+                                    </Table.Td>
+                                    {hasDrift && (
+                                      <Table.Td style={{ textAlign: 'right' }}>
+                                        <Stack gap={1} align="flex-end">
+                                          <Text size="xs" fw={700} c={suggestedBps < item.plannedBps ? 'orange' : suggestedBps > item.plannedBps ? 'blue' : 'dimmed'}>
+                                            {(suggestedBps / 100).toFixed(1)}%
+                                          </Text>
+                                          {(acc.pac_amount_minor ?? 0) > 0 && (
+                                            <Text size="10px" c="dimmed">
+                                              {suggestedMonthlyMinor > 0 ? `${money(suggestedMonthlyMinor, acc.currency ?? currency)}/mo` : '—'}
+                                            </Text>
+                                          )}
+                                        </Stack>
+                                      </Table.Td>
+                                    )}
+                                    <Table.Td style={{ textAlign: 'right' }}>
+                                      <Text size="xs" fw={600}>
+                                        {money(item.holding.value_minor, item.holding.currency ?? currency)}
+                                      </Text>
+                                    </Table.Td>
+                                    <Table.Td style={{ textAlign: 'right' }}>
+                                      {item.holding.invested_minor > 0 ? (() => {
+                                        const gain = item.holding.value_minor - item.holding.invested_minor;
+                                        return (
+                                          <Stack gap={1} align="flex-end">
+                                            <Text size="xs" fw={600}>{money(item.holding.invested_minor, item.holding.currency ?? currency)}</Text>
+                                            <Text size="10px" fw={600} c={gain >= 0 ? 'teal' : 'red'}>
+                                              {gain >= 0 ? '+' : ''}{(gain / item.holding.invested_minor * 100).toFixed(1)}%
+                                            </Text>
+                                          </Stack>
+                                        );
+                                      })() : <Text size="xs" c="dimmed">—</Text>}
+                                    </Table.Td>
+                                    <Table.Td style={{ textAlign: 'right' }}>
+                                      <TableActions>
+                                        <Tooltip label="Remove from PAC (keeps holding)" position="top" withArrow>
+                                          <TableAction label={`Remove ${item.instrumentName} from PAC`} color="gray" onClick={() => void zeroPac(item.holding)}><IconX size={14} /></TableAction>
+                                        </Tooltip>
+                                      </TableActions>
+                                    </Table.Td>
+                                  </Table.Tr>
+                                );
+                              })}
+                            </Table.Tbody>
+                          </Table>
+                        </Paper>
+
+                        {hasDrift && (
+                          <Box
+                            p="sm"
+                            mt="xs"
+                            style={{
+                              borderRadius: 8,
+                              border: '1px solid var(--mantine-color-orange-4)',
+                              background: 'light-dark(var(--mantine-color-orange-0), color-mix(in srgb, var(--mantine-color-orange-9) 20%, transparent))',
+                            }}
+                          >
+                            <Group gap="xs" mb={6}>
+                              <IconAlertTriangle size={13} color="var(--mantine-color-orange-6)" />
+                              <Text size="xs" fw={700} c="orange">
+                                Drift detected — max {(maxAbsDrift / 100).toFixed(1)}% · Suggested PAC to steer back to target
+                              </Text>
+                            </Group>
+                            <Group gap="xs" wrap="wrap">
+                              {accountPlannedHoldings.map(item => {
+                                const suggested = suggestedPacMap.get(item.holding.id) ?? item.plannedBps;
+                                const suggestedMonthly = Math.round(((acc.pac_amount_minor ?? 0) * suggested) / 10000);
+                                const changed = suggested !== item.plannedBps;
+                                return (
+                                  <Badge
+                                    key={item.holding.id}
+                                    color={suggested < item.plannedBps ? 'orange' : suggested > item.plannedBps ? 'blue' : 'gray'}
+                                    variant={changed ? 'light' : 'subtle'}
+                                  >
+                                    {item.ticker ?? (item.instrumentName ?? '').split(' ')[0]}: {(suggested / 100).toFixed(1)}%
+                                    {(acc.pac_amount_minor ?? 0) > 0 && suggestedMonthly > 0
+                                      ? ` · ${money(suggestedMonthly, acc.currency ?? currency)}`
+                                      : ''}
+                                  </Badge>
+                                );
+                              })}
+                            </Group>
+                          </Box>
+                        )}
+                      </>
                     )}
                   </Card>
                 );
