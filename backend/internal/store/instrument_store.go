@@ -237,9 +237,8 @@ func (s *Store) ListInstrumentsForEnrichment(ctx context.Context, mode string) (
 }
 
 func (s *Store) CountRefreshedToday(ctx context.Context) (int32, error) {
-	today := time.Now().Format("2006-01-02")
 	var count int32
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM instruments WHERE refreshed_at >= ?`, today).Scan(&count)
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM instruments WHERE refreshed_at >= datetime('now', '-24 hours')`).Scan(&count)
 	return count, err
 }
 
