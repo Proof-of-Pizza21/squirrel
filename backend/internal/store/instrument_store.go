@@ -236,6 +236,21 @@ func (s *Store) ListInstrumentsForEnrichment(ctx context.Context, mode string) (
 	return result, nil
 }
 
+func (s *Store) CountRefreshedToday(ctx context.Context) (int32, error) {
+	today := time.Now().Format("2006-01-02")
+	var count int32
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM instruments WHERE refreshed_at >= ?`, today).Scan(&count)
+	return count, err
+}
+
+func (s *Store) OldestEnrichedInstrument(ctx context.Context) (*portfolio.Instrument, error) {
+	instruments, err := s.ListInstrumentsForEnrichment(ctx, "oldest")
+	if err != nil || len(instruments) == 0 {
+		return nil, err
+	}
+	return &instruments[0], nil
+}
+
 func (s *Store) DeleteInstrument(ctx context.Context, id int64) error {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM instruments WHERE id=?`, id)
 	if err != nil {

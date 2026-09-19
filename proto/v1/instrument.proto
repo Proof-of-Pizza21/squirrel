@@ -168,6 +168,23 @@ message StreamInstrumentCatalogRequest {
   string mode = 1;
 }
 
+message WatchContinuousRefreshRequest {}
+
+message RefreshTick {
+  string ticker = 1;
+  string isin = 2;
+  int32 refreshed_today = 3;
+  bool enabled = 4;
+  string phase = 5; // idle | refreshing | waiting | error
+  bool has_error = 6;
+}
+
+message SetContinuousRefreshRequest {
+  bool enabled = 1;
+}
+
+message SetContinuousRefreshResponse {}
+
 message CreateInstrumentRequest {
   Instrument instrument = 1;
 }
@@ -247,4 +264,8 @@ service InstrumentService {
   rpc GetInstrumentAlternatives(GetInstrumentAlternativesRequest) returns (GetInstrumentAlternativesResponse);
   // Rank ETF candidates according to TER cost, tracking metrics, AUM size, and fund age.
   rpc RankInstruments(RankInstrumentsRequest) returns (RankInstrumentsResponse);
+  // Enable or disable the background continuous ETF refresh loop.
+  rpc SetContinuousRefresh(SetContinuousRefreshRequest) returns (SetContinuousRefreshResponse);
+  // Stream real-time ticks from the continuous background ETF refresh loop.
+  rpc WatchContinuousRefresh(WatchContinuousRefreshRequest) returns (stream RefreshTick);
 }

@@ -41,6 +41,7 @@ type Server struct {
 	ecb          *ecb.Client
 	taxRates     []portfolio.TaxRate
 	mcpHandler   *mcp.Handler
+	refresh      *refreshState
 }
 
 func New(data *store.Store, baseCurrency string, taxRates []portfolio.TaxRate, profileInterval ...time.Duration) http.Handler {
@@ -53,6 +54,9 @@ func New(data *store.Store, baseCurrency string, taxRates []portfolio.TaxRate, p
 }
 
 func NewWithConfig(data *store.Store, cfg config.Config, configPath string, profileInterval ...time.Duration) http.Handler {
+	refreshCtx, refreshCancel := context.WithCancel(context.Background())
+	_ = refreshCancel // kept alive for the lifetime of the process
+
 	s := &Server{
 		store:        data,
 		config:       cfg,
@@ -61,7 +65,10 @@ func NewWithConfig(data *store.Store, cfg config.Config, configPath string, prof
 		justETF:      justetf.New(profileInterval...),
 		ecb:          ecb.New(),
 		taxRates:     cfg.TaxRates,
+		refresh:      newRefreshState(),
 	}
+
+	go s.startContinuousRefresh(refreshCtx)
 
 	mux := http.NewServeMux()
 

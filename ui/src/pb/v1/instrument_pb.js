@@ -224,6 +224,47 @@ export const StreamInstrumentCatalogRequest = /*@__PURE__*/ proto3.makeMessageTy
 );
 
 /**
+ * @generated from message v1.WatchContinuousRefreshRequest
+ */
+export const WatchContinuousRefreshRequest = /*@__PURE__*/ proto3.makeMessageType(
+  "v1.WatchContinuousRefreshRequest",
+  [],
+);
+
+/**
+ * @generated from message v1.RefreshTick
+ */
+export const RefreshTick = /*@__PURE__*/ proto3.makeMessageType(
+  "v1.RefreshTick",
+  () => [
+    { no: 1, name: "ticker", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 2, name: "isin", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 3, name: "refreshed_today", kind: "scalar", T: 5 /* ScalarType.INT32 */ },
+    { no: 4, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+    { no: 5, name: "phase", kind: "scalar", T: 9 /* ScalarType.STRING */ },
+    { no: 6, name: "has_error", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ],
+);
+
+/**
+ * @generated from message v1.SetContinuousRefreshRequest
+ */
+export const SetContinuousRefreshRequest = /*@__PURE__*/ proto3.makeMessageType(
+  "v1.SetContinuousRefreshRequest",
+  () => [
+    { no: 1, name: "enabled", kind: "scalar", T: 8 /* ScalarType.BOOL */ },
+  ],
+);
+
+/**
+ * @generated from message v1.SetContinuousRefreshResponse
+ */
+export const SetContinuousRefreshResponse = /*@__PURE__*/ proto3.makeMessageType(
+  "v1.SetContinuousRefreshResponse",
+  [],
+);
+
+/**
  * @generated from message v1.CreateInstrumentRequest
  */
 export const CreateInstrumentRequest = /*@__PURE__*/ proto3.makeMessageType(

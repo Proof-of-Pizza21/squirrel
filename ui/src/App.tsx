@@ -94,6 +94,7 @@ import { money, investedMoney, setHideBalancesState } from './utils/format';
 import { activateSession, captureTokenFromURL, clearToken, fetchMe, isUnauthenticatedError, listSignedInUsers, rememberSession, removeSession, type AuthUser } from './auth';
 import { LoginView } from './LoginView';
 import { flushProfile, loadProfile, resetProfile, updateProfile, useProfile } from './hooks/useProfile';
+import { useContinuousRefresh } from './hooks/useContinuousRefresh';
 import { handleLinkClick } from './utils/navigation';
 import { Sidebar, type ThemeAccent, type ThemeScheme, ACCENT_HEX } from './components/Sidebar';
 
@@ -343,6 +344,7 @@ export default function App() {
   const [updateModalOpened, setUpdateModalOpened] = useState(false);
   const [quickSearchOpened, setQuickSearchOpened] = useState(false);
   const [mobileNavOpened, setMobileNavOpened] = useState(false);
+  const { tick: refreshTick, toggle: handleToggleRefresh } = useContinuousRefresh();
   const isMobile = useMediaQuery('(max-width: 48em)');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
     return localStorage.getItem('squirrel.sidebarCollapsed') === 'true';
@@ -576,6 +578,8 @@ export default function App() {
       squirrelIcon={<SquirrelIcon size={26} />}
       squirrelBrandLogo={<SquirrelBrandLogo size={24} />}
       latestSnapshotDate={latestSnapshotDate}
+      refreshTick={refreshTick}
+      onToggleRefresh={() => void handleToggleRefresh()}
     />
   );
 

@@ -1123,3 +1123,30 @@ export async function getGeoRadar(includeCash = false): Promise<GeoRadarResult> 
     })),
   };
 }
+
+export interface RefreshTickData {
+  ticker: string;
+  isin: string;
+  refreshedToday: number;
+  enabled: boolean;
+  phase: string;
+  hasError: boolean;
+}
+
+export async function* watchContinuousRefresh(options?: { signal?: AbortSignal }): AsyncIterable<RefreshTickData> {
+  const stream = instrumentClient.watchContinuousRefresh({}, options);
+  for await (const tick of stream) {
+    yield {
+      ticker: tick.ticker ?? '',
+      isin: tick.isin ?? '',
+      refreshedToday: tick.refreshedToday ?? 0,
+      enabled: tick.enabled ?? false,
+      phase: tick.phase ?? 'idle',
+      hasError: tick.hasError ?? false,
+    };
+  }
+}
+
+export async function setContinuousRefresh(enabled: boolean): Promise<void> {
+  await instrumentClient.setContinuousRefresh({ enabled });
+}

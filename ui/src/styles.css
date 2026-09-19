@@ -784,3 +784,8 @@ body,
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
 }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 2px color-mix(in srgb, var(--mantine-color-green-5) 30%, transparent); }
+  50% { opacity: 0.6; box-shadow: 0 0 0 4px color-mix(in srgb, var(--mantine-color-green-5) 10%, transparent); }
+}

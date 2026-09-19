@@ -69,6 +69,12 @@ const (
 	// InstrumentServiceRankInstrumentsProcedure is the fully-qualified name of the InstrumentService's
 	// RankInstruments RPC.
 	InstrumentServiceRankInstrumentsProcedure = "/v1.InstrumentService/RankInstruments"
+	// InstrumentServiceSetContinuousRefreshProcedure is the fully-qualified name of the
+	// InstrumentService's SetContinuousRefresh RPC.
+	InstrumentServiceSetContinuousRefreshProcedure = "/v1.InstrumentService/SetContinuousRefresh"
+	// InstrumentServiceWatchContinuousRefreshProcedure is the fully-qualified name of the
+	// InstrumentService's WatchContinuousRefresh RPC.
+	InstrumentServiceWatchContinuousRefreshProcedure = "/v1.InstrumentService/WatchContinuousRefresh"
 )
 
 // InstrumentServiceClient is a client for the v1.InstrumentService service.
@@ -97,6 +103,10 @@ type InstrumentServiceClient interface {
 	GetInstrumentAlternatives(context.Context, *connect.Request[v1.GetInstrumentAlternativesRequest]) (*connect.Response[v1.GetInstrumentAlternativesResponse], error)
 	// Rank ETF candidates according to TER cost, tracking metrics, AUM size, and fund age.
 	RankInstruments(context.Context, *connect.Request[v1.RankInstrumentsRequest]) (*connect.Response[v1.RankInstrumentsResponse], error)
+	// Enable or disable the background continuous ETF refresh loop.
+	SetContinuousRefresh(context.Context, *connect.Request[v1.SetContinuousRefreshRequest]) (*connect.Response[v1.SetContinuousRefreshResponse], error)
+	// Stream real-time ticks from the continuous background ETF refresh loop.
+	WatchContinuousRefresh(context.Context, *connect.Request[v1.WatchContinuousRefreshRequest]) (*connect.ServerStreamForClient[v1.RefreshTick], error)
 }
 
 // NewInstrumentServiceClient constructs a client for the v1.InstrumentService service. By default,
@@ -182,6 +192,18 @@ func NewInstrumentServiceClient(httpClient connect.HTTPClient, baseURL string, o
 			connect.WithSchema(instrumentServiceMethods.ByName("RankInstruments")),
 			connect.WithClientOptions(opts...),
 		),
+		setContinuousRefresh: connect.NewClient[v1.SetContinuousRefreshRequest, v1.SetContinuousRefreshResponse](
+			httpClient,
+			baseURL+InstrumentServiceSetContinuousRefreshProcedure,
+			connect.WithSchema(instrumentServiceMethods.ByName("SetContinuousRefresh")),
+			connect.WithClientOptions(opts...),
+		),
+		watchContinuousRefresh: connect.NewClient[v1.WatchContinuousRefreshRequest, v1.RefreshTick](
+			httpClient,
+			baseURL+InstrumentServiceWatchContinuousRefreshProcedure,
+			connect.WithSchema(instrumentServiceMethods.ByName("WatchContinuousRefresh")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -199,6 +221,8 @@ type instrumentServiceClient struct {
 	starInstrument            *connect.Client[v1.StarInstrumentRequest, v1.StarInstrumentResponse]
 	getInstrumentAlternatives *connect.Client[v1.GetInstrumentAlternativesRequest, v1.GetInstrumentAlternativesResponse]
 	rankInstruments           *connect.Client[v1.RankInstrumentsRequest, v1.RankInstrumentsResponse]
+	setContinuousRefresh      *connect.Client[v1.SetContinuousRefreshRequest, v1.SetContinuousRefreshResponse]
+	watchContinuousRefresh    *connect.Client[v1.WatchContinuousRefreshRequest, v1.RefreshTick]
 }
 
 // ListInstruments calls v1.InstrumentService.ListInstruments.
@@ -261,6 +285,16 @@ func (c *instrumentServiceClient) RankInstruments(ctx context.Context, req *conn
 	return c.rankInstruments.CallUnary(ctx, req)
 }
 
+// SetContinuousRefresh calls v1.InstrumentService.SetContinuousRefresh.
+func (c *instrumentServiceClient) SetContinuousRefresh(ctx context.Context, req *connect.Request[v1.SetContinuousRefreshRequest]) (*connect.Response[v1.SetContinuousRefreshResponse], error) {
+	return c.setContinuousRefresh.CallUnary(ctx, req)
+}
+
+// WatchContinuousRefresh calls v1.InstrumentService.WatchContinuousRefresh.
+func (c *instrumentServiceClient) WatchContinuousRefresh(ctx context.Context, req *connect.Request[v1.WatchContinuousRefreshRequest]) (*connect.ServerStreamForClient[v1.RefreshTick], error) {
+	return c.watchContinuousRefresh.CallServerStream(ctx, req)
+}
+
 // InstrumentServiceHandler is an implementation of the v1.InstrumentService service.
 type InstrumentServiceHandler interface {
 	// List saved instruments in the user catalog.
@@ -287,6 +321,10 @@ type InstrumentServiceHandler interface {
 	GetInstrumentAlternatives(context.Context, *connect.Request[v1.GetInstrumentAlternativesRequest]) (*connect.Response[v1.GetInstrumentAlternativesResponse], error)
 	// Rank ETF candidates according to TER cost, tracking metrics, AUM size, and fund age.
 	RankInstruments(context.Context, *connect.Request[v1.RankInstrumentsRequest]) (*connect.Response[v1.RankInstrumentsResponse], error)
+	// Enable or disable the background continuous ETF refresh loop.
+	SetContinuousRefresh(context.Context, *connect.Request[v1.SetContinuousRefreshRequest]) (*connect.Response[v1.SetContinuousRefreshResponse], error)
+	// Stream real-time ticks from the continuous background ETF refresh loop.
+	WatchContinuousRefresh(context.Context, *connect.Request[v1.WatchContinuousRefreshRequest], *connect.ServerStream[v1.RefreshTick]) error
 }
 
 // NewInstrumentServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -368,6 +406,18 @@ func NewInstrumentServiceHandler(svc InstrumentServiceHandler, opts ...connect.H
 		connect.WithSchema(instrumentServiceMethods.ByName("RankInstruments")),
 		connect.WithHandlerOptions(opts...),
 	)
+	instrumentServiceSetContinuousRefreshHandler := connect.NewUnaryHandler(
+		InstrumentServiceSetContinuousRefreshProcedure,
+		svc.SetContinuousRefresh,
+		connect.WithSchema(instrumentServiceMethods.ByName("SetContinuousRefresh")),
+		connect.WithHandlerOptions(opts...),
+	)
+	instrumentServiceWatchContinuousRefreshHandler := connect.NewServerStreamHandler(
+		InstrumentServiceWatchContinuousRefreshProcedure,
+		svc.WatchContinuousRefresh,
+		connect.WithSchema(instrumentServiceMethods.ByName("WatchContinuousRefresh")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/v1.InstrumentService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case InstrumentServiceListInstrumentsProcedure:
@@ -394,6 +444,10 @@ func NewInstrumentServiceHandler(svc InstrumentServiceHandler, opts ...connect.H
 			instrumentServiceGetInstrumentAlternativesHandler.ServeHTTP(w, r)
 		case InstrumentServiceRankInstrumentsProcedure:
 			instrumentServiceRankInstrumentsHandler.ServeHTTP(w, r)
+		case InstrumentServiceSetContinuousRefreshProcedure:
+			instrumentServiceSetContinuousRefreshHandler.ServeHTTP(w, r)
+		case InstrumentServiceWatchContinuousRefreshProcedure:
+			instrumentServiceWatchContinuousRefreshHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -449,4 +503,12 @@ func (UnimplementedInstrumentServiceHandler) GetInstrumentAlternatives(context.C
 
 func (UnimplementedInstrumentServiceHandler) RankInstruments(context.Context, *connect.Request[v1.RankInstrumentsRequest]) (*connect.Response[v1.RankInstrumentsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("v1.InstrumentService.RankInstruments is not implemented"))
+}
+
+func (UnimplementedInstrumentServiceHandler) SetContinuousRefresh(context.Context, *connect.Request[v1.SetContinuousRefreshRequest]) (*connect.Response[v1.SetContinuousRefreshResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("v1.InstrumentService.SetContinuousRefresh is not implemented"))
+}
+
+func (UnimplementedInstrumentServiceHandler) WatchContinuousRefresh(context.Context, *connect.Request[v1.WatchContinuousRefreshRequest], *connect.ServerStream[v1.RefreshTick]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("v1.InstrumentService.WatchContinuousRefresh is not implemented"))
 }

@@ -46,7 +46,7 @@ import {
   IconUserPlus,
 } from '@tabler/icons-react';
 import type { AuthUser } from '../auth';
-import type { Diagnostic } from '../api';
+import type { Diagnostic, RefreshTickData } from '../api';
 import { handleLinkClick } from '../utils/navigation';
 
 export type ThemeAccent = 'teal' | 'amber' | 'ocean' | 'violet' | 'rose';
@@ -128,6 +128,8 @@ export interface SidebarProps {
   squirrelIcon: React.ReactNode;
   squirrelBrandLogo: React.ReactNode;
   latestSnapshotDate?: string;
+  refreshTick?: RefreshTickData | null;
+  onToggleRefresh?: () => void;
 }
 
 export function formatRelativeSnapshot(dateStr?: string): { label: string; tooltip: string } {
@@ -199,6 +201,8 @@ export function Sidebar({
   squirrelIcon,
   squirrelBrandLogo,
   latestSnapshotDate,
+  refreshTick,
+  onToggleRefresh,
 }: SidebarProps) {
   const snapshotInfo = formatRelativeSnapshot(latestSnapshotDate);
   const userName = formatUserName(currentUser);
@@ -590,6 +594,74 @@ export function Sidebar({
           >
             Snapshot
           </Button>
+        </Group>
+
+        {/* Continuous ETF refresh widget */}
+        <Group
+          justify="space-between"
+          align="center"
+          wrap="nowrap"
+          mt={6}
+          px="xs"
+          py={6}
+          style={{
+            background: 'light-dark(#f8f9fa, #0d1117)',
+            border: '1px solid light-dark(rgba(0,0,0,0.05), #21262d)',
+            borderRadius: 8,
+          }}
+        >
+          <Tooltip
+            label={
+              refreshTick?.enabled
+                ? `${refreshTick.refreshedToday ?? 0} refreshed today${refreshTick.ticker ? ` · last: ${refreshTick.ticker}` : ''}`
+                : 'Auto-refresh paused'
+            }
+            position="top"
+            withArrow
+          >
+            <Box style={{ display: 'flex', alignItems: 'center', gap: 7, flex: 1, minWidth: 0, cursor: 'default' }}>
+              <Box
+                w={7}
+                h={7}
+                style={{
+                  borderRadius: '50%',
+                  flexShrink: 0,
+                  background: refreshTick?.hasError
+                    ? 'var(--mantine-color-red-5)'
+                    : refreshTick?.enabled
+                      ? 'var(--mantine-color-green-5)'
+                      : 'var(--mantine-color-gray-5)',
+                  boxShadow: refreshTick?.hasError
+                    ? '0 0 0 2px color-mix(in srgb, var(--mantine-color-red-5) 30%, transparent)'
+                    : refreshTick?.enabled
+                      ? '0 0 0 2px color-mix(in srgb, var(--mantine-color-green-5) 30%, transparent)'
+                      : 'none',
+                  animation: refreshTick?.enabled && refreshTick.phase === 'refreshing' ? 'pulse 1.4s ease-in-out infinite' : 'none',
+                }}
+              />
+              <Box style={{ minWidth: 0 }}>
+                <Text size="10px" fw={700} c="dimmed" tt="uppercase" style={{ letterSpacing: '0.06em', lineHeight: 1 }}>
+                  ETF Refresh
+                </Text>
+                {refreshTick?.enabled && (
+                  <Text size="10px" c="dimmed" truncate style={{ lineHeight: 1.4 }}>
+                    {`${refreshTick.refreshedToday ?? 0} today`}
+                    {refreshTick.ticker ? ` · ${refreshTick.ticker}` : ''}
+                  </Text>
+                )}
+              </Box>
+            </Box>
+          </Tooltip>
+          <ActionIcon
+            size="sm"
+            variant={refreshTick?.enabled ? 'light' : 'subtle'}
+            color={refreshTick?.enabled ? 'green' : 'gray'}
+            radius="md"
+            title={refreshTick?.enabled ? 'Disable auto-refresh' : 'Enable auto-refresh'}
+            onClick={onToggleRefresh}
+          >
+            <IconActivity size={13} />
+          </ActionIcon>
         </Group>
       </Box>
 

@@ -3,7 +3,7 @@
 /* eslint-disable */
 // @ts-nocheck
 
-import { CreateInstrumentRequest, CreateInstrumentResponse, DeleteInstrumentRequest, DeleteInstrumentResponse, EnrichInstrumentCatalogRequest, EnrichInstrumentCatalogResponse, EnrichmentProgress, GetInstrumentAlternativesRequest, GetInstrumentAlternativesResponse, ImportInstrumentsRequest, ImportInstrumentsResponse, ListInstrumentsRequest, ListInstrumentsResponse, LookupInstrumentRequest, LookupInstrumentResponse, RankInstrumentsRequest, RankInstrumentsResponse, SearchInstrumentsRequest, SearchInstrumentsResponse, StarInstrumentRequest, StarInstrumentResponse, StreamInstrumentCatalogRequest, SyncInstrumentCatalogRequest, SyncInstrumentCatalogResponse } from "./instrument_pb.js";
+import { CreateInstrumentRequest, CreateInstrumentResponse, DeleteInstrumentRequest, DeleteInstrumentResponse, EnrichInstrumentCatalogRequest, EnrichInstrumentCatalogResponse, EnrichmentProgress, GetInstrumentAlternativesRequest, GetInstrumentAlternativesResponse, ImportInstrumentsRequest, ImportInstrumentsResponse, ListInstrumentsRequest, ListInstrumentsResponse, LookupInstrumentRequest, LookupInstrumentResponse, RankInstrumentsRequest, RankInstrumentsResponse, RefreshTick, SearchInstrumentsRequest, SearchInstrumentsResponse, SetContinuousRefreshRequest, SetContinuousRefreshResponse, StarInstrumentRequest, StarInstrumentResponse, StreamInstrumentCatalogRequest, SyncInstrumentCatalogRequest, SyncInstrumentCatalogResponse, WatchContinuousRefreshRequest } from "./instrument_pb.js";
 import { MethodKind } from "@bufbuild/protobuf";
 
 /**
@@ -145,6 +145,28 @@ export const InstrumentService = {
       I: RankInstrumentsRequest,
       O: RankInstrumentsResponse,
       kind: MethodKind.Unary,
+    },
+    /**
+     * Enable or disable the background continuous ETF refresh loop.
+     *
+     * @generated from rpc v1.InstrumentService.SetContinuousRefresh
+     */
+    setContinuousRefresh: {
+      name: "SetContinuousRefresh",
+      I: SetContinuousRefreshRequest,
+      O: SetContinuousRefreshResponse,
+      kind: MethodKind.Unary,
+    },
+    /**
+     * Stream real-time ticks from the continuous background ETF refresh loop.
+     *
+     * @generated from rpc v1.InstrumentService.WatchContinuousRefresh
+     */
+    watchContinuousRefresh: {
+      name: "WatchContinuousRefresh",
+      I: WatchContinuousRefreshRequest,
+      O: RefreshTick,
+      kind: MethodKind.ServerStreaming,
     },
   }
 };

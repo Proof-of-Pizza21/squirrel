@@ -749,6 +749,119 @@ export declare class StreamInstrumentCatalogRequest extends Message<StreamInstru
 }
 
 /**
+ * @generated from message v1.WatchContinuousRefreshRequest
+ */
+export declare class WatchContinuousRefreshRequest extends Message<WatchContinuousRefreshRequest> {
+  constructor(data?: PartialMessage<WatchContinuousRefreshRequest>);
+
+  static readonly runtime: typeof proto3;
+  static readonly typeName = "v1.WatchContinuousRefreshRequest";
+  static readonly fields: FieldList;
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): WatchContinuousRefreshRequest;
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): WatchContinuousRefreshRequest;
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): WatchContinuousRefreshRequest;
+
+  static equals(a: WatchContinuousRefreshRequest | PlainMessage<WatchContinuousRefreshRequest> | undefined, b: WatchContinuousRefreshRequest | PlainMessage<WatchContinuousRefreshRequest> | undefined): boolean;
+}
+
+/**
+ * @generated from message v1.RefreshTick
+ */
+export declare class RefreshTick extends Message<RefreshTick> {
+  /**
+   * @generated from field: string ticker = 1;
+   */
+  ticker: string;
+
+  /**
+   * @generated from field: string isin = 2;
+   */
+  isin: string;
+
+  /**
+   * @generated from field: int32 refreshed_today = 3;
+   */
+  refreshedToday: number;
+
+  /**
+   * @generated from field: bool enabled = 4;
+   */
+  enabled: boolean;
+
+  /**
+   * idle | refreshing | waiting | error
+   *
+   * @generated from field: string phase = 5;
+   */
+  phase: string;
+
+  /**
+   * @generated from field: bool has_error = 6;
+   */
+  hasError: boolean;
+
+  constructor(data?: PartialMessage<RefreshTick>);
+
+  static readonly runtime: typeof proto3;
+  static readonly typeName = "v1.RefreshTick";
+  static readonly fields: FieldList;
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): RefreshTick;
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): RefreshTick;
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): RefreshTick;
+
+  static equals(a: RefreshTick | PlainMessage<RefreshTick> | undefined, b: RefreshTick | PlainMessage<RefreshTick> | undefined): boolean;
+}
+
+/**
+ * @generated from message v1.SetContinuousRefreshRequest
+ */
+export declare class SetContinuousRefreshRequest extends Message<SetContinuousRefreshRequest> {
+  /**
+   * @generated from field: bool enabled = 1;
+   */
+  enabled: boolean;
+
+  constructor(data?: PartialMessage<SetContinuousRefreshRequest>);
+
+  static readonly runtime: typeof proto3;
+  static readonly typeName = "v1.SetContinuousRefreshRequest";
+  static readonly fields: FieldList;
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetContinuousRefreshRequest;
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetContinuousRefreshRequest;
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetContinuousRefreshRequest;
+
+  static equals(a: SetContinuousRefreshRequest | PlainMessage<SetContinuousRefreshRequest> | undefined, b: SetContinuousRefreshRequest | PlainMessage<SetContinuousRefreshRequest> | undefined): boolean;
+}
+
+/**
+ * @generated from message v1.SetContinuousRefreshResponse
+ */
+export declare class SetContinuousRefreshResponse extends Message<SetContinuousRefreshResponse> {
+  constructor(data?: PartialMessage<SetContinuousRefreshResponse>);
+
+  static readonly runtime: typeof proto3;
+  static readonly typeName = "v1.SetContinuousRefreshResponse";
+  static readonly fields: FieldList;
+
+  static fromBinary(bytes: Uint8Array, options?: Partial<BinaryReadOptions>): SetContinuousRefreshResponse;
+
+  static fromJson(jsonValue: JsonValue, options?: Partial<JsonReadOptions>): SetContinuousRefreshResponse;
+
+  static fromJsonString(jsonString: string, options?: Partial<JsonReadOptions>): SetContinuousRefreshResponse;
+
+  static equals(a: SetContinuousRefreshResponse | PlainMessage<SetContinuousRefreshResponse> | undefined, b: SetContinuousRefreshResponse | PlainMessage<SetContinuousRefreshResponse> | undefined): boolean;
+}
+
+/**
  * @generated from message v1.CreateInstrumentRequest
  */
 export declare class CreateInstrumentRequest extends Message<CreateInstrumentRequest> {
