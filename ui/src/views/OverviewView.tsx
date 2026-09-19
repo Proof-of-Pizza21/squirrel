@@ -310,11 +310,15 @@ export function OverviewView({
                       />
 
                       <StatTile
-                        label="Annual Net Flow"
-                        value={`${netPassiveBalance >= 0 ? '+' : ''}${money(netPassiveBalance, item.currency)}/yr`}
-                        positive={netPassiveBalance >= 0}
-                        negative={netPassiveBalance < 0}
-                        hint={`+${money(item.net_revenue_minor, item.currency)}/yr net interest after -${money(annualTERDrag, item.currency)}/yr TER fund fees.`}
+                        label="Net Interest Income"
+                        value={`${item.net_revenue_minor >= 0 ? '+' : ''}${money(item.net_revenue_minor, item.currency)}/yr`}
+                        positive={item.net_revenue_minor >= 0}
+                        negative={item.net_revenue_minor < 0}
+                        hint={item.gross_revenue_minor > item.net_revenue_minor ? <>
+                          <span>Gross +{money(item.gross_revenue_minor, item.currency)}/yr</span>
+                          <br />
+                          <span>Tax −{money(item.gross_revenue_minor - item.net_revenue_minor, item.currency)}/yr</span>
+                        </> : `Gross interest +${money(item.gross_revenue_minor, item.currency)}/yr.`}
                       />
 
                       <StatTile
@@ -392,28 +396,29 @@ export function OverviewView({
                     </SimpleGrid>
                   </Card>
 
-                  {/* Area 3: Milestones & Financial Independence */}
-                  <Card withBorder className="section-card" p="md" radius="md">
-                    <div className="section-card-header">
-                      <div>
-                        <h2 className="section-card-title">Financial Independence & Milestones</h2>
-                        <p className="section-card-meta">
-                          Emergency liquidity reserves and safe withdrawal capacity
-                        </p>
-                      </div>
-                    </div>
-                    <SimpleGrid cols={{ base: 1, md: profile.show_fire_calculator ? 2 : 1 }} spacing="sm">
-                      <EmergencyReserveCard cashMinor={item.balance_minor} currency={item.currency} />
-                      {profile.show_fire_calculator && (
-                        <FreedomCalculatorCard totalWealthMinor={item.total_minor} currency={item.currency} />
-                      )}
-                    </SimpleGrid>
-                  </Card>
                 </Stack>
               );
             })
           )}
           <SnapshotHistory snapshots={data.snapshots} currency={data.summary.base_currency} reload={reload} />
+          {currencies.map(item => (
+            <Card key={item.currency} withBorder className="section-card" p="md" radius="md">
+              <div className="section-card-header">
+                <div>
+                  <h2 className="section-card-title">Financial Independence & Milestones</h2>
+                  <p className="section-card-meta">
+                    Emergency liquidity reserves and safe withdrawal capacity
+                  </p>
+                </div>
+              </div>
+              <SimpleGrid cols={{ base: 1, md: profile.show_fire_calculator ? 2 : 1 }} spacing="sm">
+                <EmergencyReserveCard cashMinor={item.balance_minor} currency={item.currency} />
+                {profile.show_fire_calculator && (
+                  <FreedomCalculatorCard totalWealthMinor={item.total_minor} currency={item.currency} />
+                )}
+              </SimpleGrid>
+            </Card>
+          ))}
         </>
       )}
     </ViewShell>
@@ -608,17 +613,34 @@ function WealthChart({ snapshots, currency }: { snapshots: Snapshot[]; currency:
   const [range, setRange] = useState<ChartRange>('max');
   const [visible, setVisible] = useState<MetricKey[]>(metricKeys);
   const [hovered, setHovered] = useState<number>();
+  const [yMode, setYMode] = useState<'abs' | 'pct'>('abs');
   const { ref: containerRef, width: containerWidth } = useElementSize();
   const chartWidth = Math.max(600, Math.round(containerWidth || 760));
 
   const shown = filterChartRange(snapshots, range);
   const active = metricKeys.filter(key => visible.includes(key));
-  const scaleValues = (active.length ? active : metricKeys).flatMap(key => shown.map(metrics[key].value));
+
+  const getDisplayValues = (key: MetricKey) => {
+    const raw = shown.map(metrics[key].value);
+    if (yMode === 'pct') {
+      const base = raw[0] ?? 0;
+      return raw.map(v => base === 0 ? 0 : ((v - base) / base) * 100);
+    }
+    return raw;
+  };
+
+  const scaleValues = (active.length ? active : metricKeys).flatMap(getDisplayValues);
   const geometry = chartGeometry(scaleValues, undefined, true, chartWidth);
   const xPoints = chartGeometry(shown.map(() => 0), scaleValues, true, chartWidth).points;
   const hoverIndex = hovered === undefined ? undefined : Math.min(hovered, shown.length - 1);
   const hoverX = hoverIndex === undefined ? 0 : xPoints[hoverIndex].x;
   const dates = [0, Math.floor((shown.length - 1) / 2), shown.length - 1].filter((index, position, all) => all.indexOf(index) === position);
+
+  const formatY = (value: number) => yMode === 'pct' ? `${value >= 0 ? '+' : ''}${value.toFixed(1)}%` : compactMoney(value, currency);
+  const formatTooltip = (key: MetricKey, displayValue: number, rawValue: number) =>
+    yMode === 'pct'
+      ? `${displayValue >= 0 ? '+' : ''}${displayValue.toFixed(2)}% (${money(rawValue, currency)})`
+      : money(rawValue, currency);
 
   return (
     <Card withBorder className="section-card" p="md" radius="md">
@@ -629,7 +651,10 @@ function WealthChart({ snapshots, currency }: { snapshots: Snapshot[]; currency:
             Historical net worth progression over time
           </p>
         </div>
-        <SegmentedControl size="xs" value={range} onChange={value => setRange(value as ChartRange)} data={['1w', '2w', '1m', '3m', '6m', '1y', '3y', '5y', 'max']} />
+        <Group gap="xs">
+          <SegmentedControl size="xs" value={yMode} onChange={value => setYMode(value as 'abs' | 'pct')} data={[{ label: '€', value: 'abs' }, { label: '%', value: 'pct' }]} />
+          <SegmentedControl size="xs" value={range} onChange={value => setRange(value as ChartRange)} data={['1w', '2w', '1m', '3m', '6m', '1y', '3y', '5y', 'max']} />
+        </Group>
       </div>
       <Card withBorder className="solid-inner-card" p="md" radius="md">
         <Stack gap="sm" ref={containerRef}>
@@ -639,7 +664,7 @@ function WealthChart({ snapshots, currency }: { snapshots: Snapshot[]; currency:
               key={key}
               size="compact-xs"
               variant={visible.includes(key) ? 'light' : 'subtle'}
-              color={metrics[key].color}
+              color={visible.includes(key) ? 'violet' : 'gray'}
               aria-pressed={visible.includes(key)}
               style={{ opacity: visible.includes(key) ? 1 : 0.45 }}
               leftSection={<Box w={14} h={2} bg={`${metrics[key].color}.5`} />}
@@ -680,20 +705,21 @@ function WealthChart({ snapshots, currency }: { snapshots: Snapshot[]; currency:
                 return (
                   <g key={index}>
                     <line x1="74" x2={chartWidth - 20} y1={y} y2={y} stroke="currentColor" opacity="0.12" />
-                    <text x="66" y={y + 4} textAnchor="end">{compactMoney(value, currency)}</text>
+                    <text x="66" y={y + 4} textAnchor="end">{formatY(value)}</text>
                   </g>
                 );
               })}
               {active.map(key => {
-                const values = shown.map(metrics[key].value);
-                const series = chartGeometry(values, scaleValues, true, chartWidth);
+                const displayValues = getDisplayValues(key);
+                const rawValues = shown.map(metrics[key].value);
+                const series = chartGeometry(displayValues, scaleValues, true, chartWidth);
                 const points = series.points.map(point => `${point.x},${point.y}`).join(' ');
                 return (
                   <g key={key}>
                     <polyline points={points} fill="none" stroke={`var(--mantine-color-${metrics[key].color}-5)`} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
                     {series.points.map((point, index) => (
                       <circle key={shown[index].observed_on} cx={point.x} cy={point.y} r="3" fill="var(--mantine-color-body)" stroke={`var(--mantine-color-${metrics[key].color}-5)`} strokeWidth="2">
-                        <title>{`${metrics[key].label} · ${shown[index].observed_on}: ${money(values[index], currency)}`}</title>
+                        <title>{`${metrics[key].label} · ${shown[index].observed_on}: ${formatTooltip(key, displayValues[index], rawValues[index])}`}</title>
                       </circle>
                     ))}
                   </g>
@@ -708,18 +734,22 @@ function WealthChart({ snapshots, currency }: { snapshots: Snapshot[]; currency:
                 <>
                   <line x1={hoverX} x2={hoverX} y1="24" y2="220" stroke="currentColor" strokeDasharray="4 4" opacity="0.45" />
                   {active.map(key => {
-                    const point = chartGeometry(shown.map(metrics[key].value), scaleValues, true, chartWidth).points[hoverIndex];
+                    const point = chartGeometry(getDisplayValues(key), scaleValues, true, chartWidth).points[hoverIndex];
                     return <circle key={key} cx={point.x} cy={point.y} r="5" fill="var(--mantine-color-body)" stroke={`var(--mantine-color-${metrics[key].color}-5)`} strokeWidth="2" />;
                   })}
                   <g transform={`translate(${hoverX > chartWidth - 230 ? hoverX - 212 : hoverX + 12} 32)`} style={{ pointerEvents: 'none' }}>
                     <rect width="200" height={32 + active.length * 20} rx="8" fill="var(--mantine-color-body)" stroke="currentColor" strokeOpacity="0.25" />
                     <text x="12" y="20" style={{ fontWeight: 700 }}>{new Date(`${shown[hoverIndex].observed_on}T00:00:00`).toLocaleDateString(undefined, { dateStyle: 'medium' })}</text>
-                    {active.map((key, index) => (
-                      <g key={key}>
-                        <line x1="12" x2="24" y1={42 + index * 20} y2={42 + index * 20} stroke={`var(--mantine-color-${metrics[key].color}-5)`} strokeWidth="2" />
-                        <text x="30" y={46 + index * 20}>{metrics[key].label}: {money(metrics[key].value(shown[hoverIndex]), currency)}</text>
-                      </g>
-                    ))}
+                    {active.map((key, index) => {
+                      const displayVals = getDisplayValues(key);
+                      const rawVals = shown.map(metrics[key].value);
+                      return (
+                        <g key={key}>
+                          <line x1="12" x2="24" y1={42 + index * 20} y2={42 + index * 20} stroke={`var(--mantine-color-${metrics[key].color}-5)`} strokeWidth="2" />
+                          <text x="30" y={46 + index * 20}>{metrics[key].label}: {formatTooltip(key, displayVals[hoverIndex], rawVals[hoverIndex])}</text>
+                        </g>
+                      );
+                    })}
                   </g>
                 </>
               )}
