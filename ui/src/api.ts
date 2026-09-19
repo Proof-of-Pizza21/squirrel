@@ -960,6 +960,39 @@ export async function deleteChatSession(id: string): Promise<boolean> {
   return Boolean(res.success);
 }
 
+export type AIConfigResponse = {
+  provider: string;
+  endpoint: string;
+  model: string;
+  context_size: number;
+  has_api_key: boolean;
+};
+
+export async function getAIConfig(): Promise<AIConfigResponse> {
+  const res = await fetch('/api/config/ai');
+  if (!res.ok) throw new Error(`getAIConfig: ${res.status}`);
+  return res.json();
+}
+
+export async function updateAIConfig(patch: {
+  provider?: string;
+  endpoint?: string;
+  model?: string;
+  api_key?: string;
+  context_size?: number;
+}): Promise<AIConfigResponse> {
+  const res = await fetch('/api/config/ai', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `updateAIConfig: ${res.status}`);
+  }
+  return res.json();
+}
+
 export type BtpBond = {
   isin: string;
   name: string;

@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"connectrpc.com/connect"
@@ -33,6 +34,8 @@ import (
 type Server struct {
 	store        *store.Store
 	config       config.Config
+	configMu     sync.RWMutex
+	configPath   string
 	baseCurrency string
 	justETF      *justetf.Client
 	ecb          *ecb.Client
@@ -46,13 +49,14 @@ func New(data *store.Store, baseCurrency string, taxRates []portfolio.TaxRate, p
 		TaxRates:     taxRates,
 		AIModels:     config.DefaultAIModels(),
 	}
-	return NewWithConfig(data, cfg, profileInterval...)
+	return NewWithConfig(data, cfg, "", profileInterval...)
 }
 
-func NewWithConfig(data *store.Store, cfg config.Config, profileInterval ...time.Duration) http.Handler {
+func NewWithConfig(data *store.Store, cfg config.Config, configPath string, profileInterval ...time.Duration) http.Handler {
 	s := &Server{
 		store:        data,
 		config:       cfg,
+		configPath:   configPath,
 		baseCurrency: cfg.BaseCurrency,
 		justETF:      justetf.New(profileInterval...),
 		ecb:          ecb.New(),
@@ -104,6 +108,10 @@ func NewWithConfig(data *store.Store, cfg config.Config, profileInterval ...time
 	s.mcpHandler = mcpHandler
 	mux.Handle("/mcp", mcpHandler)
 	mux.Handle("/mcp/", mcpHandler)
+
+	// AI config REST endpoints (no auth interceptor — local only)
+	mux.HandleFunc("GET /api/config/ai", s.handleGetAIConfig)
+	mux.HandleFunc("PATCH /api/config/ai", s.handlePatchAIConfig)
 
 	// UI fallback handler
 	mux.Handle("/", ui.Handler())

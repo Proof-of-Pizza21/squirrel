@@ -250,11 +250,19 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 		globalChatJobs.mu.Unlock()
 	}()
 
+	// Snapshot all AI config fields under a single read lock.
+	s.configMu.RLock()
+	cfgEndpoint := strings.TrimRight(s.config.AIEndpoint, "/")
+	cfgModel := s.config.AIModel
+	cfgContextSize := s.config.AIContextSize
+	cfgSystemPrompt := s.config.AISystemPrompt
+	s.configMu.RUnlock()
+
 	ctx := job.Ctx
 	requestedEndpoint := strings.TrimRight(strings.TrimSpace(msg.Endpoint), "/")
 	endpoint := requestedEndpoint
 	if endpoint == "" {
-		endpoint = strings.TrimRight(s.config.AIEndpoint, "/")
+		endpoint = cfgEndpoint
 	}
 	parsedEndpoint, err := validateHTTPSOrLoopbackURL(endpoint)
 	if len(endpoint) > 2048 || err != nil || parsedEndpoint.RawQuery != "" || parsedEndpoint.Fragment != "" {
@@ -264,7 +272,7 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 	endpoint = strings.TrimRight(parsedEndpoint.String(), "/")
 	model := strings.TrimSpace(msg.Model)
 	if model == "" {
-		model = s.config.AIModel
+		model = cfgModel
 	}
 	if model == "" || len(model) > 256 {
 		job.Broadcaster.Broadcast(&portv1.StreamChatResponse{ErrorMessage: "AI model is required and must not exceed 256 characters", Done: true})
@@ -273,7 +281,7 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 
 	contextSize := msg.ContextSize
 	if contextSize <= 0 {
-		contextSize = int32(s.config.AIContextSize)
+		contextSize = int32(cfgContextSize)
 	}
 	if contextSize <= 0 {
 		contextSize = 16384
@@ -305,7 +313,7 @@ func (s *Server) runBackgroundChat(job *activeChatJob, msg *portv1.StreamChatReq
 		totalPromptBudget = 400
 	}
 
-	basePrompt := s.config.AISystemPrompt
+	basePrompt := cfgSystemPrompt
 	baseTokens := len(basePrompt) / 3
 
 	systemPrompt := basePrompt
@@ -470,9 +478,12 @@ func (s *Server) aiAPIKey(requestKey, requestedEndpoint, resolvedEndpoint string
 	if requestKey != "" {
 		return requestKey
 	}
+	s.configMu.RLock()
 	configuredEndpoint := strings.TrimRight(strings.TrimSpace(s.config.AIEndpoint), "/")
+	cfgAPIKey := s.config.AIAPIKey
+	s.configMu.RUnlock()
 	if requestedEndpoint == "" || resolvedEndpoint == configuredEndpoint {
-		return s.config.AIAPIKey
+		return cfgAPIKey
 	}
 	return ""
 }

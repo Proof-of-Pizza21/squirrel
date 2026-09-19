@@ -58,6 +58,8 @@ import {
   deleteChatSession,
   stopChatSession,
   getChatStatus,
+  getAIConfig,
+  updateAIConfig,
 } from '../api';
 import { MarkdownRenderer } from '../components/MarkdownRenderer';
 import { money, percent } from '../utils/format';
@@ -126,6 +128,7 @@ export function AIConsultantView({
   const [userProfile] = useProfile();
   const [settings, setSettings] = useState<AISettings>(getSavedSettings);
   const [settingsOpened, setSettingsOpened] = useState(false);
+  const [hasServerApiKey, setHasServerApiKey] = useState(false);
   const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -426,6 +429,21 @@ export function AIConsultantView({
       /* validation is enforced by the profile service */
     }
   }, [userProfile.ai_settings_json]);
+
+  // Load server-side AI config on mount to know whether an API key is stored.
+  useEffect(() => {
+    getAIConfig().then(cfg => {
+      setHasServerApiKey(cfg.has_api_key);
+      // Merge server defaults for provider/endpoint/model if local storage has none.
+      setSettings(current => ({
+        provider: current.provider || (cfg.provider as AISettings['provider']) || current.provider,
+        endpoint: current.endpoint || cfg.endpoint || current.endpoint,
+        model: current.model || cfg.model || current.model,
+        apiKey: current.apiKey,
+        contextSize: current.contextSize || cfg.context_size || current.contextSize,
+      }));
+    }).catch(() => { /* server may not support endpoint yet */ });
+  }, []);
 
   // Build sanitized portfolio summary context
   const primaryCurrency = summary.base_currency || 'EUR';
@@ -1100,7 +1118,9 @@ export function AIConsultantView({
         opened={settingsOpened}
         onClose={() => setSettingsOpened(false)}
         settings={settings}
+        hasServerApiKey={hasServerApiKey}
         onSave={saveSettings}
+        onServerApiKeySaved={saved => setHasServerApiKey(saved)}
       />
     </ViewShell>
   );
@@ -1110,12 +1130,16 @@ function AISettingsModal({
   opened,
   onClose,
   settings,
+  hasServerApiKey,
   onSave,
+  onServerApiKeySaved,
 }: {
   opened: boolean;
   onClose: () => void;
   settings: AISettings;
+  hasServerApiKey: boolean;
   onSave: (newSettings: AISettings) => void;
+  onServerApiKeySaved: (hasKey: boolean) => void;
 }) {
   const [provider, setProvider] = useState(settings.provider);
   const [endpoint, setEndpoint] = useState(settings.endpoint);
@@ -1135,6 +1159,9 @@ function AISettingsModal({
   const [downloading, setDownloading] = useState(false);
   const [downloadNotice, setDownloadNotice] = useState('');
   const [downloadError, setDownloadError] = useState('');
+  const [serverSaveLoading, setServerSaveLoading] = useState(false);
+  const [serverSaveNotice, setServerSaveNotice] = useState('');
+  const [serverSaveError, setServerSaveError] = useState('');
 
   const loadModels = async () => {
     try {
@@ -1172,6 +1199,33 @@ function AISettingsModal({
     }
   };
 
+  const handleSaveToServer = async () => {
+    setServerSaveLoading(true);
+    setServerSaveError('');
+    setServerSaveNotice('');
+    try {
+      const patch: Parameters<typeof updateAIConfig>[0] = {
+        provider,
+        endpoint,
+        model,
+        context_size: contextSize,
+      };
+      // Only send api_key if the user typed a new one.
+      if (apiKey) {
+        patch.api_key = apiKey;
+      }
+      const result = await updateAIConfig(patch);
+      setServerSaveNotice('Saved to squirrel.yaml');
+      onServerApiKeySaved(result.has_api_key);
+      // Clear the in-memory key after successful server save.
+      setApiKey('');
+    } catch (cause) {
+      setServerSaveError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setServerSaveLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!opened) return;
     setProvider(settings.provider);
@@ -1179,6 +1233,12 @@ function AISettingsModal({
     setModel(settings.model);
     setApiKey(settings.apiKey);
     setContextSize(settings.contextSize || 16384);
+    setServerSaveNotice('');
+    setServerSaveError('');
+    // Also refresh server config to get latest has_api_key state.
+    getAIConfig().then(cfg => {
+      onServerApiKeySaved(cfg.has_api_key);
+    }).catch(() => { /* optional */ });
     void loadModels();
     if (settings.provider === 'ollama') {
       void fetchOllamaModels(settings.endpoint);
@@ -1361,8 +1421,8 @@ function AISettingsModal({
             {provider !== 'ollama' && (
               <PasswordInput
                 label="API Key (Optional for local servers)"
-                description="Kept in memory for this page only; never saved to browser storage."
-                placeholder="sk-..."
+                description={hasServerApiKey ? 'An API key is stored in squirrel.yaml. Enter a new value to replace it, or leave blank to keep the existing key.' : 'Kept in memory for this page only. Use "Save to Config File" below to persist in squirrel.yaml.'}
+                placeholder={hasServerApiKey ? '(saved)' : 'sk-...'}
                 value={apiKey}
                 onChange={e => setApiKey(e.currentTarget.value)}
               />
@@ -1522,6 +1582,24 @@ function AISettingsModal({
               Download Custom
             </Button>
           </Group>
+        </Paper>
+
+        <Paper withBorder p="md" radius="md">
+          <Text fw={700} size="sm" mb={4}>Persist to Config File (squirrel.yaml)</Text>
+          <Text size="xs" c="dimmed" mb="sm">
+            Save provider, endpoint, model, context size, and API key to the server config file so settings survive restarts.
+            The API key is never returned to the browser — only whether one is stored.
+          </Text>
+          {serverSaveError && <Alert color="red" mb="sm" withCloseButton onClose={() => setServerSaveError('')}>{serverSaveError}</Alert>}
+          {serverSaveNotice && <Alert color="teal" mb="sm" withCloseButton onClose={() => setServerSaveNotice('')}>{serverSaveNotice}</Alert>}
+          <Button
+            size="sm"
+            color="violet"
+            loading={serverSaveLoading}
+            onClick={() => void handleSaveToServer()}
+          >
+            Save to Config File
+          </Button>
         </Paper>
 
         <Group justify="end">

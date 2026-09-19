@@ -48,7 +48,7 @@ func main() {
 
 	server := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           service.NewWithConfig(data, cfg, cfg.JustETFEnrichInterval),
+		Handler:           service.NewWithConfig(data, cfg, *configPath, cfg.JustETFEnrichInterval),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
