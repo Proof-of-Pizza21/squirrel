@@ -31,10 +31,11 @@ import {
   IconGlobe,
   IconNotes,
   IconPencil,
+  IconRefresh,
   IconTrash,
   IconX,
 } from '@tabler/icons-react';
-import { api, type Account, type Holding, type Instrument, type TaxRate } from '../api';
+import { api, instrumentClient, type Account, type Holding, type Instrument, type TaxRate } from '../api';
 import { GeoRadarSection } from './GeoRadarView';
 import { DraftPortfoliosView } from './DraftPortfoliosView';
 import { SubnavTabs } from '../components/SubnavTabs';
@@ -332,6 +333,7 @@ export function InvestmentsView({
   const [selectedAssetClass, setSelectedAssetClass] = useState<string | null>(null);
   const { confirmDelete, modal: confirmDeleteModal } = useConfirmDelete();
   const [driftThresholdBps, setDriftThresholdBps] = useState(1000);
+  const [refreshingISIN, setRefreshingISIN] = useState<string | null>(null);
   const table = useBackendRows('/api/holdings', holdings, 'value', 'desc');
   const activeAccounts = accounts.filter(account => !account.archived); const activeAccountIDs = new Set(activeAccounts.map(account => account.id));
   const accountMap = new Map<number, Account>(accounts.map(a => [a.id, a]));
@@ -340,6 +342,18 @@ export function InvestmentsView({
     confirmDelete('investment', `${holding.instrument_name} · ${holding.account_name}`, async () => {
       try { await api(`/api/holdings/${holding.id}`, { method: 'DELETE' }); await reload(); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     });
+  };
+  const refreshInstrument = async (isin: string) => {
+    setRefreshingISIN(isin);
+    try {
+      await instrumentClient.importInstruments({ isins: [isin] });
+      await reload();
+      notifications.show({ color: 'teal', message: `${isin} data refreshed` });
+    } catch (cause) {
+      notifications.show({ color: 'red', message: `Failed to refresh ${isin}: ${cause instanceof Error ? cause.message : String(cause)}` });
+    } finally {
+      setRefreshingISIN(null);
+    }
   };
   const zeroPac = async (holding: Holding) => {
     try {
@@ -462,9 +476,11 @@ export function InvestmentsView({
       holding: h,
       instrumentName: h.instrument_name,
       ticker: h.instrument_ticker,
+      isin: h.instrument_isin,
       plannedBps,
       itemMonthlyMinor,
       terBps,
+      fundSizeMillion: inst?.fund_size_million ?? 0,
     };
   });
 
@@ -590,9 +606,14 @@ export function InvestmentsView({
               title="No active accounts"
               text="Add or restore an account to build an allocation strategy."
             />
+          ) : plannedHoldings.length === 0 ? (
+            <Empty
+              title="No PAC allocations"
+              text="Assign a planned allocation to at least one holding to build a strategy."
+            />
           ) : (
             <Stack gap="md">
-              {visibleAccounts.map(acc => {
+              {visibleAccounts.filter(acc => planItems.some(item => item.holding.account_id === acc.id)).map(acc => {
                 const allocatedBps = plannedByAccount.get(acc.id) ?? 0;
                 const pct = Math.min(allocatedBps / 100, 100);
                 const over = allocatedBps > 10000;
@@ -600,8 +621,15 @@ export function InvestmentsView({
                 const accountPlannedHoldings = planItems.filter(item => item.holding.account_id === acc.id);
                 const allocatedMonthlyMinor = Math.round(((acc.pac_amount_minor ?? 0) * allocatedBps) / 10000);
 
+                // Per-account portfolio stats
+                const accHoldings = activeHoldings.filter(h => h.account_id === acc.id);
+                const accountTotalValue = accHoldings.reduce((sum, h) => sum + h.value_minor, 0);
+                const accountTotalInvested = accHoldings.reduce((sum, h) => sum + h.invested_minor, 0);
+                const accPlanTERNum = accountPlannedHoldings.reduce((sum, item) => sum + item.plannedBps * item.terBps, 0);
+                const accWeightedTERBps = allocatedBps > 0 ? accPlanTERNum / allocatedBps : 0;
+                const accAnnualFeeDragMinor = accountPlannedHoldings.reduce((sum, item) => sum + Math.round((item.itemMonthlyMinor * 12 * item.terBps) / 10000), 0);
+
                 // Drift computation
-                const accountTotalValue = activeHoldings.filter(h => h.account_id === acc.id).reduce((sum, h) => sum + h.value_minor, 0);
                 const driftMap = new Map(accountPlannedHoldings.map(item => {
                   const actualAccBps = accountTotalValue > 0
                     ? Math.round(item.holding.value_minor * 10000 / accountTotalValue)
@@ -712,6 +740,42 @@ export function InvestmentsView({
 
                     <Divider my="sm" opacity={0.5} />
 
+                    {(accountTotalValue > 0 || accWeightedTERBps > 0) && (
+                      <Group gap="xl" mb="sm" wrap="wrap">
+                        {accWeightedTERBps > 0 && (
+                          <Stack gap={1}>
+                            <Text size="xs" c="dimmed">Plan-Weighted TER</Text>
+                            <Group gap={6} align="baseline">
+                              <Text size="sm" fw={700}>{percent(accWeightedTERBps)}</Text>
+                              {accAnnualFeeDragMinor > 0 && <Text size="xs" c="orange">-{money(accAnnualFeeDragMinor, acc.currency ?? currency)}/yr drag</Text>}
+                            </Group>
+                          </Stack>
+                        )}
+                        {accountTotalValue > 0 && (
+                          <Stack gap={1}>
+                            <Text size="xs" c="dimmed">Portfolio Value</Text>
+                            <Text size="sm" fw={700}>{money(accountTotalValue, acc.currency ?? currency)}</Text>
+                          </Stack>
+                        )}
+                        {accountTotalInvested > 0 && (
+                          <Stack gap={1}>
+                            <Text size="xs" c="dimmed">Invested</Text>
+                            <Group gap={6} align="baseline">
+                              <Text size="sm" fw={700}>{money(accountTotalInvested, acc.currency ?? currency)}</Text>
+                              {(() => {
+                                const gain = accountTotalValue - accountTotalInvested;
+                                return gain !== 0 ? (
+                                  <Text size="xs" fw={600} c={gain >= 0 ? 'teal' : 'red'}>
+                                    {gain >= 0 ? '+' : ''}{(gain / accountTotalInvested * 100).toFixed(1)}%
+                                  </Text>
+                                ) : null;
+                              })()}
+                            </Group>
+                          </Stack>
+                        )}
+                      </Group>
+                    )}
+
                     {accountPlannedHoldings.length === 0 ? (
                       <Text size="xs" c="dimmed" py="sm" ta="center">
                         No ETF allocations assigned to this account yet. Click "Add Investment" to configure.
@@ -722,15 +786,16 @@ export function InvestmentsView({
                           <Table verticalSpacing="xs" horizontalSpacing="xs" highlightOnHover className="data-table">
                             <Table.Thead>
                               <Table.Tr>
-                                <Table.Th style={{ width: hasDrift ? '22%' : '25%' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Instrument</Text></Table.Th>
+                                <Table.Th style={{ width: hasDrift ? '19%' : '22%' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Instrument</Text></Table.Th>
                                 <Table.Th style={{ width: '7%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">TER</Text></Table.Th>
-                                <Table.Th style={{ width: '11%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Planned</Text></Table.Th>
-                                <Table.Th style={{ width: '11%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Actual / Drift</Text></Table.Th>
-                                <Table.Th style={{ width: '10%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Monthly</Text></Table.Th>
-                                {hasDrift && <Table.Th style={{ width: '10%', textAlign: 'right' }}><Text size="xs" fw={700} c="orange" tt="uppercase">Suggested PAC</Text></Table.Th>}
-                                <Table.Th style={{ width: '9%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Value</Text></Table.Th>
-                                <Table.Th style={{ width: '9%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Invested</Text></Table.Th>
-                                <Table.Th style={{ width: '3%', textAlign: 'right' }}></Table.Th>
+                                <Table.Th style={{ width: '8%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">AUM</Text></Table.Th>
+                                <Table.Th style={{ width: '10%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Planned</Text></Table.Th>
+                                <Table.Th style={{ width: '10%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Actual / Drift</Text></Table.Th>
+                                <Table.Th style={{ width: '9%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Monthly</Text></Table.Th>
+                                {hasDrift && <Table.Th style={{ width: '9%', textAlign: 'right' }}><Text size="xs" fw={700} c="orange" tt="uppercase">Suggested PAC</Text></Table.Th>}
+                                <Table.Th style={{ width: '8%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Value</Text></Table.Th>
+                                <Table.Th style={{ width: '8%', textAlign: 'right' }}><Text size="xs" fw={700} c="dimmed" tt="uppercase">Invested</Text></Table.Th>
+                                <Table.Th style={{ width: '5%', textAlign: 'right' }}></Table.Th>
                               </Table.Tr>
                             </Table.Thead>
                             <Table.Tbody>
@@ -751,6 +816,15 @@ export function InvestmentsView({
                                     </Table.Td>
                                     <Table.Td style={{ textAlign: 'right' }}>
                                       <Text size="xs" c={item.terBps > 0 ? undefined : 'dimmed'}>{item.terBps > 0 ? percent(item.terBps) : '—'}</Text>
+                                    </Table.Td>
+                                    <Table.Td style={{ textAlign: 'right' }}>
+                                      {item.fundSizeMillion > 0 ? (
+                                        <Text size="xs" c="dimmed">
+                                          {item.fundSizeMillion >= 1000
+                                            ? `€${(item.fundSizeMillion / 1000).toFixed(1)}bn`
+                                            : `€${item.fundSizeMillion}m`}
+                                        </Text>
+                                      ) : <Text size="xs" c="dimmed">—</Text>}
                                     </Table.Td>
                                     <Table.Td style={{ textAlign: 'right' }}>
                                       <InlinePlannedBpsEditor holding={item.holding} onSaved={reload} />
@@ -802,6 +876,11 @@ export function InvestmentsView({
                                     </Table.Td>
                                     <Table.Td style={{ textAlign: 'right' }}>
                                       <TableActions>
+                                        <Tooltip label={`Refresh ${item.isin} data from justETF`} position="top" withArrow>
+                                          <TableAction label={`Refresh ${item.instrumentName}`} color="blue" disabled={refreshingISIN !== null} onClick={() => void refreshInstrument(item.isin ?? '')}>
+                                            <IconRefresh size={14} style={refreshingISIN === item.isin ? { animation: 'spin 1s linear infinite' } : undefined} />
+                                          </TableAction>
+                                        </Tooltip>
                                         <Tooltip label="Remove from PAC (keeps holding)" position="top" withArrow>
                                           <TableAction label={`Remove ${item.instrumentName} from PAC`} color="gray" onClick={() => void zeroPac(item.holding)}><IconX size={14} /></TableAction>
                                         </Tooltip>
@@ -931,15 +1010,53 @@ export function InvestmentsView({
           ) : displayedHoldings.length === 0 ? (
             <Empty title="No matching asset class investments" text={`No investments found under ${label(selectedAssetClass || '')}. Clear filter to show all.`} />
           ) : (
-            <DataTable
-              rows={displayedHoldings}
-              columns={columns}
-              rowKey={holding => holding.id}
-              minWidth={1050}
-              sort={table.sort}
-              direction={table.direction}
-              onSort={(key, direction) => void table.sortRows(key, direction)}
-            />
+            <Stack gap="md">
+              {visibleAccounts.filter(acc => displayedHoldings.some(h => h.account_id === acc.id)).map(acc => {
+                const accHoldings = displayedHoldings.filter(h => h.account_id === acc.id);
+                const accValue = accHoldings.reduce((s, h) => s + h.value_minor, 0);
+                const accInvested = accHoldings.reduce((s, h) => s + h.invested_minor, 0);
+                const accTERNum = accHoldings.reduce((s, h) => s + h.value_minor * (h.ter_bps ?? instMap.get(h.instrument_id)?.ter_bps ?? 0), 0);
+                const accTER = accValue > 0 ? accTERNum / accValue : 0;
+                const accFeeDrag = Math.round(accTERNum / 10000);
+                const accGain = accValue - accInvested;
+                const accCurrency = acc.currency ?? currency;
+                const accColumns = columns.filter(c => c.key !== 'account');
+                return (
+                  <Card key={acc.id} className="metric" p="lg" radius="lg" withBorder>
+                    <Group justify="space-between" align="start" mb="xs">
+                      <Group gap="xs" align="center">
+                        <Text fw={750} size="md">{acc.name}</Text>
+                        <Badge size="xs" variant="light" color="gray">{acc.type}</Badge>
+                        <Badge size="xs" variant="outline" color="teal">{accCurrency}</Badge>
+                      </Group>
+                      <Group gap="xl" align="baseline">
+                        {accValue > 0 && <Text size="sm" fw={700}>{money(accValue, accCurrency)}</Text>}
+                        {accInvested > 0 && (
+                          <Text size="xs" c={accGain >= 0 ? 'teal' : 'red'} fw={600}>
+                            {accGain >= 0 ? '+' : ''}{(accGain / accInvested * 100).toFixed(1)}% P&L
+                          </Text>
+                        )}
+                        {accTER > 0 && (
+                          <Text size="xs" c="dimmed">
+                            TER <Text span fw={700} c="dimmed">{(accTER / 100).toFixed(2)}%</Text>
+                            {accFeeDrag > 0 && <Text span c="orange"> · -{money(accFeeDrag, accCurrency)}/yr</Text>}
+                          </Text>
+                        )}
+                      </Group>
+                    </Group>
+                    <DataTable
+                      rows={accHoldings}
+                      columns={accColumns}
+                      rowKey={h => h.id}
+                      minWidth={950}
+                      sort={table.sort}
+                      direction={table.direction}
+                      onSort={(key, direction) => void table.sortRows(key, direction)}
+                    />
+                  </Card>
+                );
+              })}
+            </Stack>
           )}
         </>
       )}
